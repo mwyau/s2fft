@@ -345,3 +345,25 @@ def test_healpix_c_backend_forward_custom_gradients(
         )
 
     check_grads(func, (f,), order=2, modes=("fwd", "rev"))
+
+
+def test_gl_even_longitude_reverse_mode_gradients(flm_generator):
+    L = 6
+    nphi = 2 * L
+    flm = flm_generator(L, spin=1)
+    flm_target = flm_generator(L, spin=1)
+    f_target = spherical.inverse_jax(flm_target, L, spin=1, sampling="gl", nphi=nphi)
+
+    def inverse_loss(coefficients):
+        f = spherical.inverse_jax(coefficients, L, spin=1, sampling="gl", nphi=nphi)
+        return jnp.sum(jnp.abs(f - f_target) ** 2)
+
+    check_grads(inverse_loss, (flm,), order=1, modes=("rev",))
+
+    f = spherical.inverse_jax(flm, L, spin=1, sampling="gl", nphi=nphi)
+
+    def forward_loss(signal):
+        coefficients = spherical.forward_jax(signal, L, spin=1, sampling="gl")
+        return jnp.sum(jnp.abs(coefficients - flm_target) ** 2)
+
+    check_grads(forward_loss, (f,), order=1, modes=("rev",))

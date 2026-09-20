@@ -193,6 +193,20 @@ The :math:`\theta_t` are determined by the roots of the Legendre polynomials of 
 
   \varphi_p = \frac{2\pi p}{2L-1},  \quad p\in\lbrace 0, 1, ...,2L-2\rbrace.
 
+By default, GL sampling uses :math:`L` latitude points and :math:`2L-1`
+uniform longitude points. S2FFT also supports :math:`2L` longitude points,
+as commonly used for regular Gaussian grids. For the :math:`2L` grid, the
+longitude Nyquist mode lies outside the spherical-harmonic band-limit and is
+omitted.
+
+.. code-block:: python
+
+  import s2fft
+
+  L = 128
+  f = s2fft.inverse(flm, L, sampling="gl", nphi=2 * L)
+  flm = s2fft.forward(f, L, sampling="gl")
+
 Further information; `Gauss-Legendre (1986) <https://link.springer.com/article/10.1007/BF02519350>`_.
 
 .. _healpix:

@@ -17,6 +17,7 @@ def inverse(
     nside: int = None,
     reality: bool = False,
     L_lower: int = 0,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute inverse spherical harmonic transform.
@@ -43,6 +44,9 @@ def inverse(
         L_lower (int, optional): Harmonic lower-bound. Transform will only be computed
             for :math:`\texttt{L_lower} \leq \ell < \texttt{L}`. Defaults to 0.
 
+        nphi (int, optional): Number of GL longitude samples. Supports `2L-1`
+            and `2L`. Defaults to `2L-1`.
+
     Returns:
         np.ndarray: Signal on the sphere.
 
@@ -56,6 +60,7 @@ def inverse(
         method="sov_fft_vectorized",
         reality=reality,
         L_lower=L_lower,
+        nphi=nphi,
     )
 
 
@@ -68,6 +73,7 @@ def _inverse(
     nside: int = None,
     reality: bool = False,
     L_lower: int = 0,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute inverse spherical harmonic transform using a specified method.
@@ -128,6 +134,7 @@ def _inverse(
         nside=nside,
         reality=reality,
         L_lower=L_lower,
+        nphi=nphi,
     )
 
 
@@ -188,11 +195,14 @@ def forward(
     if iter == 0:
         return _forward(f, **common_kwargs)
     else:
+        inverse_kwargs = common_kwargs.copy()
+        if sampling.lower() == "gl":
+            inverse_kwargs["nphi"] = f.shape[-1]
         return iterative_refinement.forward_with_iterative_refinement(
             f,
             n_iter=iter,
             forward_function=partial(_forward, **common_kwargs),
-            backward_function=partial(_inverse, **common_kwargs),
+            backward_function=partial(_inverse, **inverse_kwargs),
         )
 
 
@@ -237,7 +247,17 @@ def _forward(
         np.ndarray: Spherical harmonic coefficients.
 
     """
-    assert f.shape == samples.f_shape(L, sampling, nside)
+    if sampling.lower() == "gl":
+        nphi = f.shape[-1]
+        if nphi not in (2 * L - 1, 2 * L):
+            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
+        expected_shape = (L, nphi)
+        if f.shape != expected_shape:
+            raise ValueError(
+                f"Expected GL input shape {expected_shape}, got {f.shape}."
+            )
+    else:
+        assert f.shape == samples.f_shape(L, sampling, nside)
     assert L > 0
     assert 0 <= L_lower < L
 
@@ -263,6 +283,8 @@ def _forward(
     # Don't need to include spin in weights (even for spin signals)
     # since accounted for already in periodic extension and upsampling.
     weights = quadrature.quad_weights_transform(L, sampling, 0, nside)
+    if sampling.lower() == "gl" and f.shape[-1] == 2 * L:
+        weights *= (2 * L - 1) / (2 * L)
 
     transform_methods = {
         "direct": _compute_forward_direct,
@@ -292,6 +314,7 @@ def _compute_inverse_direct(
     nside: int,
     reality: bool,
     L_lower: int,
+    nphi: int | None,
 ):
     r"""
     Compute inverse spherical harmonic transform directly.
@@ -321,10 +344,13 @@ def _compute_inverse_direct(
         np.ndarray: Signal on the sphere.
 
     """
-    if sampling.lower() != "healpix":
-        phis_ring = samples.phis_equiang(L, sampling)
+    if sampling.lower() == "healpix":
+        f_shape = samples.f_shape(L, sampling, nside)
+    else:
+        phis_ring = samples.phis_equiang(L, sampling, nphi)
+        f_shape = (len(thetas), len(phis_ring))
 
-    f = np.zeros(samples.f_shape(L, sampling, nside), dtype=np.complex128)
+    f = np.zeros(f_shape, dtype=np.complex128)
 
     for t, theta in enumerate(thetas):
         if sampling.lower() == "healpix":
@@ -378,6 +404,7 @@ def _compute_inverse_sov(
     nside: int,
     reality: bool,
     L_lower: int,
+    nphi: int | None,
 ):
     r"""
     Compute inverse spherical harmonic transform by separation of variables with a
@@ -420,9 +447,12 @@ def _compute_inverse_sov(
                     (-1) ** spin * elfactor * dl[m + L - 1] * flm[el, m + L - 1]
                 )
 
-    f = np.zeros(samples.f_shape(L, sampling, nside), dtype=np.complex128)
-    if sampling.lower() != "healpix":
-        phis_ring = samples.phis_equiang(L, sampling)
+    if sampling.lower() == "healpix":
+        f_shape = samples.f_shape(L, sampling, nside)
+    else:
+        phis_ring = samples.phis_equiang(L, sampling, nphi)
+        f_shape = (len(thetas), len(phis_ring))
+    f = np.zeros(f_shape, dtype=np.complex128)
     for t, theta in enumerate(thetas):
         if sampling.lower() == "healpix":
             phis_ring = samples.phis_ring(t, nside)
@@ -452,6 +482,7 @@ def _compute_inverse_sov_fft(
     nside: int,
     reality: bool,
     L_lower: int,
+    nphi: int | None,
 ):
     r"""
     Compute inverse spherical harmonic transform by separation of variables with a
@@ -521,16 +552,21 @@ def _compute_inverse_sov_fft(
                 ftm[t, m + L - 1 + m_offset] += val
 
     if sampling.lower() == "healpix":
+        if nphi is not None:
+            samples.nphi_equiang(L, sampling, nphi)
         f = hp.healpix_ifft(ftm, L, nside, "numpy", reality)
     else:
+        nphi_out = samples.nphi_equiang(L, sampling, nphi)
         if reality:
             f = np.fft.irfft(
                 ftm[:, L - 1 + m_offset :],
-                samples.nphi_equiang(L, sampling),
+                n=nphi_out,
                 axis=1,
                 norm="forward",
             )
         else:
+            if sampling.lower() == "gl" and nphi == 2 * L:
+                ftm = np.pad(ftm, ((0, 0), (1, 0)))
             f = np.fft.ifft(np.fft.ifftshift(ftm, axes=1), axis=1, norm="forward")
 
     return f
@@ -545,6 +581,7 @@ def _compute_inverse_sov_fft_vectorized(
     nside: int,
     reality: bool,
     L_lower: int,
+    nphi: int | None,
 ):
     r"""
     A vectorized function to compute inverse spherical harmonic transform by
@@ -597,16 +634,21 @@ def _compute_inverse_sov_fft_vectorized(
 
     ftm *= (-1) ** (spin)
     if sampling.lower() == "healpix":
+        if nphi is not None:
+            samples.nphi_equiang(L, sampling, nphi)
         f = hp.healpix_ifft(ftm, L, nside, "numpy", reality)
     else:
+        nphi_out = samples.nphi_equiang(L, sampling, nphi)
         if reality:
             f = np.fft.irfft(
                 ftm[:, L - 1 + m_offset :],
-                samples.nphi_equiang(L, sampling),
+                n=nphi_out,
                 axis=1,
                 norm="forward",
             )
         else:
+            if sampling.lower() == "gl" and nphi == 2 * L:
+                ftm = np.pad(ftm, ((0, 0), (1, 0)))
             f = np.fft.ifft(np.fft.ifftshift(ftm, axes=1), axis=1, norm="forward")
 
     return f
@@ -656,7 +698,8 @@ def _compute_forward_direct(
     flm = np.zeros(samples.flm_shape(L), dtype=np.complex128)
 
     if sampling.lower() != "healpix":
-        phis_ring = samples.phis_equiang(L, sampling)
+        nphi = f.shape[-1] if sampling.lower() == "gl" else None
+        phis_ring = samples.phis_equiang(L, sampling, nphi)
 
     for t, theta in enumerate(thetas):
         if sampling.lower() == "healpix":
@@ -746,7 +789,8 @@ def _compute_forward_sov(
 
     """
     if sampling.lower() != "healpix":
-        phis_ring = samples.phis_equiang(L, sampling)
+        nphi = f.shape[-1] if sampling.lower() == "gl" else None
+        phis_ring = samples.phis_equiang(L, sampling, nphi)
 
     ftm = np.zeros((len(thetas), 2 * L - 1), dtype=np.complex128)
     for t, theta in enumerate(thetas):
@@ -842,24 +886,32 @@ def _compute_forward_sov_fft(
 
     """
     flm = np.zeros(samples.flm_shape(L), dtype=np.complex128)
-    ftm = np.zeros_like(f).astype(np.complex128)
+    even_gl = sampling.lower() == "gl" and f.shape[-1] == 2 * L
 
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
 
     if sampling.lower() == "healpix":
         ftm = hp.healpix_fft(f, L, nside, "numpy", reality)
+    elif reality:
+        ftm_temp = np.fft.rfft(
+            np.real(f),
+            axis=1,
+            norm="backward",
+        )
+        if even_gl:
+            ftm_temp = ftm_temp[:, :L]
+        if m_offset != 0:
+            ftm_temp = ftm_temp[:, :-1]
+        ftm = (
+            np.zeros(samples.ftm_shape(L, sampling, nside), dtype=np.complex128)
+            if even_gl
+            else np.zeros_like(f).astype(np.complex128)
+        )
+        ftm[:, L - 1 + m_offset :] = ftm_temp
     else:
-        if reality:
-            ftm_temp = np.fft.rfft(
-                np.real(f),
-                axis=1,
-                norm="backward",
-            )
-            if m_offset != 0:
-                ftm_temp = ftm_temp[:, :-1]
-            ftm[:, L - 1 + m_offset :] = ftm_temp
-        else:
-            ftm = np.fft.fftshift(np.fft.fft(f, axis=1, norm="backward"), axes=1)
+        ftm = np.fft.fftshift(np.fft.fft(f, axis=1, norm="backward"), axes=1)
+        if even_gl:
+            ftm = ftm[:, 1:]
 
     for t, theta in enumerate(thetas):
         phi_ring_offset = (
@@ -958,7 +1010,7 @@ def _compute_forward_sov_fft_vectorized(
 
     """
     flm = np.zeros(samples.flm_shape(L), dtype=np.complex128)
-    ftm = np.zeros_like(f).astype(np.complex128)
+    even_gl = sampling.lower() == "gl" and f.shape[-1] == 2 * L
 
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
     if reality:
@@ -966,18 +1018,26 @@ def _compute_forward_sov_fft_vectorized(
 
     if sampling.lower() == "healpix":
         ftm = hp.healpix_fft(f, L, nside, "numpy", reality)
+    elif reality:
+        t = np.fft.rfft(
+            np.real(f),
+            axis=1,
+            norm="backward",
+        )
+        if even_gl:
+            t = t[:, :L]
+        if m_offset != 0:
+            t = t[:, :-1]
+        ftm = (
+            np.zeros(samples.ftm_shape(L, sampling, nside), dtype=np.complex128)
+            if even_gl
+            else np.zeros_like(f).astype(np.complex128)
+        )
+        ftm[:, L - 1 + m_offset :] = t
     else:
-        if reality:
-            t = np.fft.rfft(
-                np.real(f),
-                axis=1,
-                norm="backward",
-            )
-            if m_offset != 0:
-                t = t[:, :-1]
-            ftm[:, L - 1 + m_offset :] = t
-        else:
-            ftm = np.fft.fftshift(np.fft.fft(f, axis=1, norm="backward"), axes=1)
+        ftm = np.fft.fftshift(np.fft.fft(f, axis=1, norm="backward"), axes=1)
+        if even_gl:
+            ftm = ftm[:, 1:]
 
     for t, theta in enumerate(thetas):
         phase_shift = (

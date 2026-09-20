@@ -176,3 +176,38 @@ def test_samples_exceptions():
 
     with pytest.raises(ValueError):
         samples.t2theta(t=0, sampling="mw")
+
+
+@pytest.mark.parametrize("nphi", [11, 12])
+def test_gl_even_longitude_samples(nphi: int):
+    L = 6
+
+    assert samples.nphi_equiang(L, "gl", nphi) == nphi
+    assert samples.f_shape(L, "gl", nphi=nphi) == (L, nphi)
+    expected_phis = 2 * np.pi * np.arange(nphi) / nphi
+    np.testing.assert_allclose(samples.phis_equiang(L, "gl", nphi), expected_phis)
+    np.testing.assert_allclose(
+        samples.p2phi_equiang(L, np.arange(nphi), "gl", nphi), expected_phis
+    )
+
+
+def test_gl_even_longitude_default_equivalence():
+    L = 6
+    nphi = 2 * L - 1
+
+    assert samples.nphi_equiang(L, "gl") == samples.nphi_equiang(L, "gl", nphi)
+    assert samples.f_shape(L, "gl") == samples.f_shape(L, "gl", nphi=nphi)
+    np.testing.assert_array_equal(
+        samples.phis_equiang(L, "gl"), samples.phis_equiang(L, "gl", nphi)
+    )
+
+
+@pytest.mark.parametrize("nphi", [True, np.bool_(True), 10.0, 10, 13])
+def test_gl_even_longitude_invalid_nphi(nphi):
+    with pytest.raises(ValueError):
+        samples.nphi_equiang(6, "gl", nphi)
+
+
+def test_non_gl_rejects_nphi():
+    with pytest.raises(ValueError, match="only for sampling='gl'"):
+        samples.nphi_equiang(6, "mw", 11)

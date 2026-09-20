@@ -31,6 +31,7 @@ def inverse(
     spmd: bool = False,
     L_lower: int = 0,
     _ssht_backend: int = 1,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Wrapper for the inverse spin-spherical harmonic transform.
@@ -69,6 +70,9 @@ def inverse(
             (set to 0) recursions or pick up ducc0 (set to 1) accelerated experimental
             backend. Use with caution.
 
+        nphi (int, optional): Number of GL longitude samples. Supports `2L-1`
+            and `2L`. Defaults to `2L-1`.
+
     Raises:
         ValueError: Transform method not recognised.
 
@@ -86,12 +90,17 @@ def inverse(
     if method not in _inverse_functions:
         raise ValueError(f"Method {method} not recognised.")
 
+    if nphi is not None and method in ("jax_ssht", "jax_healpy"):
+        samples.nphi_equiang(L, sampling, nphi)
+
     if spin >= 8 and method in ("numpy", "jax", "jax_cuda", "torch"):
         raise Warning("Recursive transform may provide lower precision beyond spin ~ 8")
 
     inverse_kwargs = {"flm": flm, "L": L}
     if method in ("numpy", "jax", "jax_cuda", "torch"):
-        inverse_kwargs.update(sampling=sampling, precomps=precomps, L_lower=L_lower)
+        inverse_kwargs.update(
+            sampling=sampling, precomps=precomps, L_lower=L_lower, nphi=nphi
+        )
     if method in ("jax", "jax_cuda", "torch"):
         inverse_kwargs["spmd"] = spmd
     if method == "jax_healpy":
@@ -102,6 +111,8 @@ def inverse(
     if method == "jax_ssht":
         if sampling.lower() == "healpix":
             raise ValueError("SSHT does not support healpix sampling.")
+        if nphi == 2 * L:
+            raise ValueError("jax_ssht does not support 2L-longitude GL.")
         ssht_sampling = ["mw", "mwss", "dh", "gl"].index(sampling.lower())
         inverse_kwargs.update(ssht_sampling=ssht_sampling, _ssht_backend=_ssht_backend)
     else:
@@ -119,6 +130,7 @@ def inverse_numpy(
     reality: bool = False,
     precomps: list = None,
     L_lower: int = 0,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute the inverse spin-spherical harmonic transform (numpy).
@@ -150,10 +162,21 @@ def inverse_numpy(
         L_lower (int, optional): Harmonic lower-bound. Transform will only be computed
             for :math:`\texttt{L_lower} \leq \ell < \texttt{L}`. Defaults to 0.
 
+        nphi (int, optional): Number of GL longitude samples. Supports `2L-1`
+            and `2L`. Defaults to `2L-1`.
+
     Returns:
         np.ndarray: Signal on the sphere.
 
     """
+    if sampling.lower() == "healpix":
+        if nphi is not None:
+            samples.nphi_equiang(L, sampling, nphi)
+        nphi_out = None
+    else:
+        nphi_out = samples.nphi_equiang(L, sampling, nphi)
+    even_gl = sampling.lower() == "gl" and nphi_out == 2 * L
+
     # Define latitudinal sample positions and Fourier offsets
     thetas = samples.thetas(L, sampling, nside)
     m_offset = 1 if sampling.lower() in ["mwss", "healpix"] else 0
@@ -201,15 +224,17 @@ def inverse_numpy(
         if reality:
             return np.fft.irfft(
                 ftm[:, L - 1 + m_offset :],
-                samples.nphi_equiang(L, sampling),
+                n=nphi_out,
                 axis=1,
                 norm="forward",
             )
         else:
+            if even_gl:
+                ftm = np.pad(ftm, ((0, 0), (1, 0)))
             return np.fft.ifft(np.fft.ifftshift(ftm, axes=1), axis=1, norm="forward")
 
 
-@partial(jit, static_argnums=(1, 3, 4, 5, 7, 8, 9))
+@partial(jit, static_argnums=(1, 3, 4, 5, 7, 8, 9, 10))
 def inverse_jax(
     flm: jnp.ndarray,
     L: int,
@@ -221,6 +246,7 @@ def inverse_jax(
     spmd: bool = False,
     L_lower: int = 0,
     use_healpix_custom_primitive: bool = False,
+    nphi: int | None = None,
 ) -> jnp.ndarray:
     r"""
     Compute the inverse spin-spherical harmonic transform (JAX).
@@ -262,6 +288,9 @@ def inverse_jax(
             primitive reduces long compilation times when just-in-time compiling.
             Defaults to `False`.
 
+        nphi (int, optional): Number of GL longitude samples. Supports `2L-1`
+            and `2L`. Defaults to `2L-1`.
+
     Returns:
         jnp.ndarray: Signal on the sphere.
 
@@ -273,6 +302,14 @@ def inverse_jax(
         recover acceleration by the number of devices.
 
     """
+    if sampling.lower() == "healpix":
+        if nphi is not None:
+            samples.nphi_equiang(L, sampling, nphi)
+        nphi_out = None
+    else:
+        nphi_out = samples.nphi_equiang(L, sampling, nphi)
+    even_gl = sampling.lower() == "gl" and nphi_out == 2 * L
+
     # Define latitudinal sample positions and Fourier offsets
     thetas = samples.thetas(L, sampling, nside)
     m_offset = 1 if sampling.lower() in ["mwss", "healpix"] else 0
@@ -322,6 +359,17 @@ def inverse_jax(
         else:
             return hp.healpix_ifft(ftm, L, nside, "jax")
     else:
+        if reality:
+            return jnp.real(
+                jnp.fft.irfft(
+                    ftm[:, L - 1 + m_offset :],
+                    n=nphi_out,
+                    axis=1,
+                    norm="forward",
+                )
+            )
+        if even_gl:
+            ftm = jnp.pad(ftm, ((0, 0), (1, 0)))
         ftm = jnp.conj(jnp.fft.ifftshift(ftm, axes=1))
         f = jnp.conj(jnp.fft.fft(ftm, axis=1, norm="backward"))
         return jnp.real(f) if reality else f
@@ -406,6 +454,17 @@ def forward(
     if method not in _forward_functions:
         raise ValueError(f"Method {method} not recognised.")
 
+    nphi = None
+    if sampling.lower() == "gl":
+        nphi = f.shape[-1]
+        if nphi not in (2 * L - 1, 2 * L):
+            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
+        expected_shape = (L, nphi)
+        if f.shape != expected_shape:
+            raise ValueError(
+                f"Expected GL input shape {expected_shape}, got {f.shape}."
+            )
+
     if spin >= 8 and method in ("numpy", "jax", "jax_cuda", "torch"):
         raise Warning("Recursive transform may provide lower precision beyond spin ~ 8")
 
@@ -426,6 +485,8 @@ def forward(
     if method == "jax_ssht":
         if sampling.lower() == "healpix":
             raise ValueError("SSHT does not support healpix sampling.")
+        if nphi == 2 * L:
+            raise ValueError("jax_ssht does not support 2L-longitude GL.")
         ssht_sampling = ["mw", "mwss", "dh", "gl"].index(sampling.lower())
         forward_kwargs.update(ssht_sampling=ssht_sampling, _ssht_backend=_ssht_backend)
     else:
@@ -435,6 +496,8 @@ def forward(
         f = forward_kwargs.pop("f")
         inverse_kwargs = forward_kwargs.copy()
         inverse_kwargs.pop("precomps")
+        if method in ("numpy", "jax", "jax_cuda", "torch") and sampling.lower() == "gl":
+            inverse_kwargs["nphi"] = nphi
         return iterative_refinement.forward_with_iterative_refinement(
             f=f,
             n_iter=iter,
@@ -489,6 +552,17 @@ def forward_numpy(
         np.ndarray: Spherical harmonic coefficients
 
     """
+    if sampling.lower() == "gl":
+        nphi = f.shape[-1]
+        if nphi not in (2 * L - 1, 2 * L):
+            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
+        expected_shape = (L, nphi)
+        if f.shape != expected_shape:
+            raise ValueError(
+                f"Expected GL input shape {expected_shape}, got {f.shape}."
+            )
+    even_gl = sampling.lower() == "gl" and f.shape[-1] == 2 * L
+
     # Resample mw onto mwss and double resolution of both
     if sampling.lower() == "mw":
         f = resampling.mw_to_mwss(f, L, spin)
@@ -501,6 +575,8 @@ def forward_numpy(
 
     # Define latitudinal sample positions and Fourier offsets
     weights = quadrature.quad_weights_transform(L, sampling, 0, nside)
+    if even_gl:
+        weights *= (2 * L - 1) / (2 * L)
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
     m_start_ind = L - 1 if reality else 0
     L0 = L_lower
@@ -511,12 +587,20 @@ def forward_numpy(
     else:
         if reality:
             t = np.fft.rfft(np.real(f), axis=1, norm="backward")
+            if even_gl:
+                t = t[:, :L]
             if m_offset != 0:
                 t = t[:, :-1]
-            ftm = np.zeros_like(f).astype(np.complex128)
+            ftm = (
+                np.zeros(samples.ftm_shape(L, sampling, nside), dtype=np.complex128)
+                if even_gl
+                else np.zeros_like(f).astype(np.complex128)
+            )
             ftm[:, L - 1 + m_offset :] = t
         else:
             ftm = np.fft.fftshift(np.fft.fft(f, axis=1, norm="backward"), axes=1)
+            if even_gl:
+                ftm = ftm[:, 1:]
 
     # Apply quadrature weights
     ftm = np.einsum("tm,t->tm", ftm, weights)
@@ -633,6 +717,17 @@ def forward_jax(
         recover acceleration by the number of devices.
 
     """
+    if sampling.lower() == "gl":
+        nphi = f.shape[-1]
+        if nphi not in (2 * L - 1, 2 * L):
+            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
+        expected_shape = (L, nphi)
+        if f.shape != expected_shape:
+            raise ValueError(
+                f"Expected GL input shape {expected_shape}, got {f.shape}."
+            )
+    even_gl = sampling.lower() == "gl" and f.shape[-1] == 2 * L
+
     # Resample mw onto mwss and double resolution of both
     if sampling.lower() == "mw":
         f = resampling_jax.mw_to_mwss(f, L, spin)
@@ -645,6 +740,8 @@ def forward_jax(
 
     # Define latitudinal sample positions and Fourier offsets
     weights = quadrature_jax.quad_weights_transform(L, sampling, nside)
+    if even_gl:
+        weights *= (2 * L - 1) / (2 * L)
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
     m_start_ind = L - 1 if reality else 0
 
@@ -657,12 +754,20 @@ def forward_jax(
     else:
         if reality:
             t = jnp.fft.rfft(jnp.real(f), axis=1, norm="backward")
+            if even_gl:
+                t = t[:, :L]
             if m_offset != 0:
                 t = t[:, :-1]
-            ftm = jnp.zeros_like(f).astype(jnp.complex128)
+            ftm = (
+                jnp.zeros(samples.ftm_shape(L, sampling, nside), dtype=jnp.complex128)
+                if even_gl
+                else jnp.zeros_like(f).astype(jnp.complex128)
+            )
             ftm = ftm.at[:, L - 1 + m_offset :].set(t)
         else:
             ftm = jnp.fft.fftshift(jnp.fft.fft(f, axis=1, norm="backward"), axes=1)
+            if even_gl:
+                ftm = ftm[:, 1:]
 
     # Apply quadrature weights
     ftm = jnp.einsum("tm,t->tm", ftm, weights, optimize=True)

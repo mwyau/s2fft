@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import torch
 
+from s2fft.base_transforms import spherical as base
 from s2fft.recursions.price_mcewen import generate_precomputes
 from s2fft.sampling import s2_samples as samples
 from s2fft.transforms import spherical
@@ -233,3 +234,154 @@ def test_sampling_exceptions(flm_generator):
 
     with pytest.raises(ValueError):
         spherical.forward(None, 0, 0, None, method="incorrect")
+
+
+@pytest.mark.parametrize("method", method_to_test)
+@pytest.mark.parametrize("reality", reality_to_test)
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_gl_even_longitude_transforms(flm_generator, method: str, reality: bool):
+    L = 6
+    nphi = 2 * L
+    spin = 0 if reality else 1
+    flm = flm_generator(L, spin=spin, reality=reality)
+    flm_input = torch.from_numpy(flm) if method == "torch" else flm
+
+    f = spherical.inverse(
+        flm_input,
+        L,
+        spin=spin,
+        sampling="gl",
+        method=method,
+        reality=reality,
+        nphi=nphi,
+    )
+    assert f.shape == (L, nphi)
+    flm_roundtrip = spherical.forward(
+        f,
+        L,
+        spin=spin,
+        sampling="gl",
+        method=method,
+        reality=reality,
+    )
+    if method == "torch":
+        flm_roundtrip = flm_roundtrip.resolve_conj().numpy()
+
+    np.testing.assert_allclose(flm_roundtrip, flm, atol=1e-12, rtol=1e-12)
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_gl_even_longitude_fft_modes(flm_generator):
+    L = 6
+    nphi = 2 * L
+    flm = flm_generator(L, spin=1)
+
+    f = spherical.inverse(flm, L, spin=1, sampling="gl", nphi=nphi)
+    f_default = spherical.inverse(flm, L, spin=1, sampling="gl")
+    ftm = np.fft.fftshift(np.fft.fft(f, axis=-1), axes=-1)
+    ftm_default = np.fft.fftshift(np.fft.fft(f_default, axis=-1), axes=-1)
+    np.testing.assert_allclose(ftm[:, 1:] * (2 * L - 1) / nphi, ftm_default, atol=1e-12)
+    np.testing.assert_allclose(ftm[:, :1], 0, atol=1e-12)
+
+
+@pytest.mark.parametrize("method", method_to_test)
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_gl_even_longitude_inverse_matches_direct(flm_generator, method: str):
+    L = 6
+    nphi = 2 * L
+    spin = 1
+    flm = flm_generator(L, spin=spin)
+    flm_input = torch.from_numpy(flm) if method == "torch" else flm
+
+    f = spherical.inverse(
+        flm_input, L, spin=spin, sampling="gl", method=method, nphi=nphi
+    )
+    if method == "torch":
+        f = f.resolve_conj().numpy()
+    f_direct = base._inverse(flm, L, spin, "gl", method="direct", nphi=nphi)
+
+    np.testing.assert_allclose(f, f_direct, atol=1e-12, rtol=1e-12)
+
+
+@pytest.mark.parametrize("method", method_to_test)
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_gl_even_longitude_discards_even_nyquist_mode(method: str):
+    L = 6
+    nphi = 2 * L
+    f = np.tile((-1.0) ** np.arange(nphi), (L, 1))
+    f_input = torch.from_numpy(f) if method == "torch" else f
+
+    flm = spherical.forward(f_input, L, sampling="gl", method=method, reality=True)
+    if method == "torch":
+        flm = flm.resolve_conj().numpy()
+
+    np.testing.assert_allclose(flm, 0, atol=1e-12)
+
+
+@pytest.mark.parametrize("method", method_to_test)
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_gl_explicit_default_longitude_matches_default(flm_generator, method: str):
+    L = 6
+    flm = flm_generator(L, spin=1)
+    flm_input = torch.from_numpy(flm) if method == "torch" else flm
+
+    f_default = spherical.inverse(flm_input, L, spin=1, sampling="gl", method=method)
+    f_explicit = spherical.inverse(
+        flm_input, L, spin=1, sampling="gl", method=method, nphi=2 * L - 1
+    )
+    if method == "torch":
+        f_default = f_default.resolve_conj().numpy()
+        f_explicit = f_explicit.resolve_conj().numpy()
+    np.testing.assert_array_equal(f_default, f_explicit)
+
+
+def test_gl_even_longitude_torch_autograd(flm_generator):
+    L = 6
+    nphi = 2 * L
+    flm = torch.from_numpy(flm_generator(L, spin=1)).requires_grad_()
+
+    f = spherical.inverse(flm, L, spin=1, sampling="gl", method="torch", nphi=nphi)
+    torch.sum(torch.abs(f) ** 2).backward()
+
+    assert flm.grad is not None
+    assert torch.isfinite(flm.grad).all()
+
+
+@pytest.mark.slow
+def test_gl_even_longitude_torch_gradcheck(flm_generator):
+    L = 3
+    nphi = 2 * L
+    flm = torch.from_numpy(flm_generator(L)).requires_grad_()
+
+    assert torch.autograd.gradcheck(
+        lambda coefficients: spherical.inverse(
+            coefficients, L, sampling="gl", method="torch", nphi=nphi
+        ),
+        (flm,),
+    )
+
+    f = spherical.inverse(
+        flm.detach(), L, sampling="gl", method="torch", nphi=nphi
+    ).requires_grad_()
+    assert torch.autograd.gradcheck(
+        lambda signal: spherical.forward(signal, L, sampling="gl", method="torch"),
+        (f,),
+    )
+
+
+def test_jax_ssht_rejects_even_gl_longitude(flm_generator):
+    L = 6
+    nphi = 2 * L
+    flm = flm_generator(L)
+    f = np.zeros((L, nphi), dtype=np.complex128)
+
+    with pytest.raises(ValueError, match="does not support 2L-longitude GL"):
+        spherical.inverse(flm, L, sampling="gl", method="jax_ssht", nphi=nphi)
+    with pytest.raises(ValueError, match="does not support 2L-longitude GL"):
+        spherical.forward(f, L, sampling="gl", method="jax_ssht")
+
+
+def test_gl_even_longitude_validates_input_shape():
+    L = 6
+    with pytest.raises(ValueError, match="GL input must"):
+        spherical.forward(np.zeros((L, 2 * L + 1)), L, sampling="gl")

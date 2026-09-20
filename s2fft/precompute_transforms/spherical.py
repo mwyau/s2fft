@@ -26,6 +26,7 @@ def inverse(
     reality: bool = False,
     method: str = "jax",
     nside: int | None = None,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute the inverse spherical harmonic transform via precompute.
@@ -52,6 +53,9 @@ def inverse(
         nside (int): HEALPix Nside resolution parameter.  Only required
             if sampling="healpix".
 
+        nphi (int, optional): Number of GL longitude samples. Supports `2L-1`
+            and `2L`. Defaults to `2L-1`.
+
     Raises:
         ValueError: Transform method not recognised.
 
@@ -70,7 +74,7 @@ def inverse(
             + "Defering to complex transform.",
             stacklevel=2,
         )
-    common_kwargs = {
+    kernel_kwargs = {
         "L": L,
         "sampling": sampling,
         "reality": reality,
@@ -78,11 +82,11 @@ def inverse(
         "nside": nside,
     }
     kernel = (
-        _kernel_functions[method](forward=False, **common_kwargs)
+        _kernel_functions[method](forward=False, **kernel_kwargs)
         if kernel is None
         else kernel
     )
-    return _inverse_functions[method](flm, kernel, **common_kwargs)
+    return _inverse_functions[method](flm, kernel, nphi=nphi, **kernel_kwargs)
 
 
 def inverse_transform(
@@ -93,6 +97,7 @@ def inverse_transform(
     reality: bool,
     spin: int,
     nside: int,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute the forward spherical harmonic transform via precompute (vectorized
@@ -116,10 +121,20 @@ def inverse_transform(
         nside (int): HEALPix Nside resolution parameter.  Only required
             if sampling="healpix".
 
+        nphi (int, optional): Number of GL longitude samples. Supports `2L-1`
+            and `2L`. Defaults to `2L-1`.
+
     Returns:
         np.ndarray: Pixel-space coefficients.
 
     """
+    if sampling.lower() == "healpix":
+        if nphi is not None:
+            samples.nphi_equiang(L, sampling, nphi)
+        nphi_out = None
+    else:
+        nphi_out = samples.nphi_equiang(L, sampling, nphi)
+    even_gl = sampling.lower() == "gl" and nphi_out == 2 * L
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
     m_start_ind = L - 1 if reality else 0
 
@@ -140,17 +155,19 @@ def inverse_transform(
         if reality:
             f = np.fft.irfft(
                 ftm[:, m_start_ind + m_offset :],
-                samples.nphi_equiang(L, sampling),
+                n=nphi_out,
                 axis=-1,
                 norm="forward",
             )
         else:
+            if even_gl:
+                ftm = np.pad(ftm, ((0, 0), (1, 0)))
             f = np.fft.ifftshift(ftm, axes=-1)
             f = np.fft.ifft(f, axis=-1, norm="forward")
     return f
 
 
-@partial(jit, static_argnums=(2, 3, 4, 5, 6))
+@partial(jit, static_argnums=(2, 3, 4, 5, 6, 7))
 def inverse_transform_jax(
     flm: jnp.ndarray,
     kernel: jnp.ndarray,
@@ -159,6 +176,7 @@ def inverse_transform_jax(
     reality: bool,
     spin: int,
     nside: int,
+    nphi: int | None = None,
 ) -> jnp.ndarray:
     r"""
     Compute the inverse spherical harmonic transform via precompute (JAX
@@ -182,10 +200,20 @@ def inverse_transform_jax(
         nside (int): HEALPix Nside resolution parameter.  Only required
             if sampling="healpix".
 
+        nphi (int, optional): Number of GL longitude samples. Supports `2L-1`
+            and `2L`. Defaults to `2L-1`.
+
     Returns:
         jnp.ndarray: Pixel-space coefficients with shape.
 
     """
+    if sampling.lower() == "healpix":
+        if nphi is not None:
+            samples.nphi_equiang(L, sampling, nphi)
+        nphi_out = None
+    else:
+        nphi_out = samples.nphi_equiang(L, sampling, nphi)
+    even_gl = sampling.lower() == "gl" and nphi_out == 2 * L
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
     m_start_ind = L - 1 if reality else 0
 
@@ -212,11 +240,13 @@ def inverse_transform_jax(
         if reality:
             f = jnp.fft.irfft(
                 ftm[:, m_start_ind + m_offset :],
-                samples.nphi_equiang(L, sampling),
+                n=nphi_out,
                 axis=-1,
                 norm="forward",
             )
         else:
+            if even_gl:
+                ftm = jnp.pad(ftm, ((0, 0), (1, 0)))
             f = jnp.fft.ifftshift(ftm, axes=-1)
             f = jnp.fft.ifft(f, axis=-1, norm="forward")
 
@@ -279,6 +309,15 @@ def forward(
     """
     if method not in _forward_functions:
         raise ValueError(f"Method {method} not recognised.")
+    if sampling.lower() == "gl":
+        nphi = f.shape[-1]
+        if nphi not in (2 * L - 1, 2 * L):
+            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
+        expected_shape = (L, nphi)
+        if f.shape != expected_shape:
+            raise ValueError(
+                f"Expected GL input shape {expected_shape}, got {f.shape}."
+            )
     if reality and spin != 0:
         reality = False
         warn(
@@ -286,7 +325,7 @@ def forward(
             + "Defering to complex transform.",
             stacklevel=2,
         )
-    common_kwargs = {
+    kernel_kwargs = {
         "L": L,
         "sampling": sampling,
         "reality": reality,
@@ -294,22 +333,25 @@ def forward(
         "nside": nside,
     }
     kernel = (
-        _kernel_functions[method](forward=True, **common_kwargs)
+        _kernel_functions[method](forward=True, **kernel_kwargs)
         if kernel is None
         else kernel
     )
     if iter == 0:
-        return _forward_functions[method](f, kernel, **common_kwargs)
+        return _forward_functions[method](f, kernel, **kernel_kwargs)
     else:
-        inverse_kernel = _kernel_functions[method](forward=False, **common_kwargs)
+        inverse_kernel = _kernel_functions[method](forward=False, **kernel_kwargs)
+        inverse_kwargs = kernel_kwargs.copy()
+        if sampling.lower() == "gl":
+            inverse_kwargs["nphi"] = f.shape[-1]
         return iterative_refinement.forward_with_iterative_refinement(
             f=f,
             n_iter=iter,
             forward_function=partial(
-                _forward_functions[method], kernel=kernel, **common_kwargs
+                _forward_functions[method], kernel=kernel, **kernel_kwargs
             ),
             backward_function=partial(
-                _inverse_functions[method], kernel=inverse_kernel, **common_kwargs
+                _inverse_functions[method], kernel=inverse_kernel, **inverse_kwargs
             ),
         )
 
@@ -349,6 +391,17 @@ def forward_transform(
         np.ndarray: Pixel-space coefficients.
 
     """
+    if sampling.lower() == "gl":
+        nphi = f.shape[-1]
+        if nphi not in (2 * L - 1, 2 * L):
+            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
+        expected_shape = (L, nphi)
+        if f.shape != expected_shape:
+            raise ValueError(
+                f"Expected GL input shape {expected_shape}, got {f.shape}."
+            )
+    even_gl = sampling.lower() == "gl" and f.shape[-1] == 2 * L
+
     if sampling.lower() == "mw":
         f = resampling.mw_to_mwss(f, L, spin)
 
@@ -366,11 +419,18 @@ def forward_transform(
     else:
         if reality:
             ftm = np.fft.rfft(np.real(f), axis=-1, norm="backward")
+            if even_gl:
+                ftm = ftm[:, :L]
             if m_offset != 0:
                 ftm = ftm[:, :-1]
         else:
             ftm = np.fft.fft(f, axis=-1, norm="backward")
             ftm = np.fft.fftshift(ftm, axes=-1)[:, m_offset:]
+            if even_gl:
+                ftm = ftm[:, 1:]
+    if even_gl:
+        # Kernel uses the default 2L-1 longitude normalization.
+        ftm *= (2 * L - 1) / (2 * L)
     flm = np.zeros(samples.flm_shape(L), dtype=compatible_complex_dtype(f))
     flm[:, m_start_ind:] = np.einsum("...tlm, ...tm -> ...lm", kernel, ftm)
 
@@ -419,6 +479,17 @@ def forward_transform_jax(
         jnp.ndarray: Pixel-space coefficients.
 
     """
+    if sampling.lower() == "gl":
+        nphi = f.shape[-1]
+        if nphi not in (2 * L - 1, 2 * L):
+            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
+        expected_shape = (L, nphi)
+        if f.shape != expected_shape:
+            raise ValueError(
+                f"Expected GL input shape {expected_shape}, got {f.shape}."
+            )
+    even_gl = sampling.lower() == "gl" and f.shape[-1] == 2 * L
+
     if sampling.lower() == "mw":
         f = resampling_jax.mw_to_mwss(f, L, spin)
 
@@ -436,11 +507,18 @@ def forward_transform_jax(
     else:
         if reality:
             ftm = jnp.fft.rfft(jnp.real(f), axis=-1, norm="backward")
+            if even_gl:
+                ftm = ftm[:, :L]
             if m_offset != 0:
                 ftm = ftm[:, :-1]
         else:
             ftm = jnp.fft.fft(f, axis=-1, norm="backward")
             ftm = jnp.fft.fftshift(ftm, axes=-1)[:, m_offset:]
+            if even_gl:
+                ftm = ftm[:, 1:]
+    if even_gl:
+        # Kernel uses the default 2L-1 longitude normalization.
+        ftm *= (2 * L - 1) / (2 * L)
 
     flm = jnp.zeros(samples.flm_shape(L), dtype=compatible_complex_dtype(f))
     flm = flm.at[:, m_start_ind:].set(

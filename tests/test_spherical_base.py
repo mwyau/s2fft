@@ -173,3 +173,20 @@ def test_L_lower_exception(flm_generator, L: int):
 
     with pytest.raises(AssertionError):
         spherical.inverse(flm, L, spin, sampling, L_lower=L)
+
+
+@pytest.mark.parametrize("method", method_to_test)
+@pytest.mark.parametrize("reality", reality_to_test)
+def test_gl_even_longitude_transforms(flm_generator, method: str, reality: bool):
+    L = 6
+    nphi = 2 * L
+    spin = 0 if reality else 1
+    flm = flm_generator(L, spin=spin, reality=reality)
+
+    f = spherical._inverse(
+        flm, L, spin, "gl", method=method, reality=reality, nphi=nphi
+    )
+    assert f.shape == (L, nphi)
+    flm_roundtrip = spherical._forward(f, L, spin, "gl", method=method, reality=reality)
+
+    np.testing.assert_allclose(flm_roundtrip, flm, atol=1e-12, rtol=1e-12)

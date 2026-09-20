@@ -345,3 +345,74 @@ def test_inverse_transform_unrecognised_method_raises():
     flm = np.zeros(samples.flm_shape(L))
     with pytest.raises(ValueError, match=f"{method} not recognised"):
         inverse(flm, L, method=method)
+
+
+@pytest.mark.parametrize("method", methods_to_test)
+@pytest.mark.parametrize("reality", reality_to_test)
+def test_gl_even_longitude_transforms(
+    get_flm_and_precompute_kernel, method: str, reality: bool
+):
+    L = 6
+    nphi = 2 * L
+    spin = 0 if reality else 1
+    flm, inverse_kernel = get_flm_and_precompute_kernel(
+        L, spin, "gl", reality, method, "price-mcewen", forward=False
+    )
+    _, forward_kernel = get_flm_and_precompute_kernel(
+        L, spin, "gl", reality, method, "price-mcewen", forward=True
+    )
+    flm_input = torch.from_numpy(flm) if method == "torch" else flm
+
+    f = inverse(
+        flm_input,
+        L,
+        spin=spin,
+        kernel=inverse_kernel,
+        sampling="gl",
+        reality=reality,
+        method=method,
+        nphi=nphi,
+    )
+    assert f.shape == (L, nphi)
+    flm_roundtrip = forward(
+        f,
+        L,
+        spin=spin,
+        kernel=forward_kernel,
+        sampling="gl",
+        reality=reality,
+        method=method,
+        iter=1,
+    )
+    if method == "torch":
+        flm_roundtrip = flm_roundtrip.resolve_conj().numpy()
+
+    np.testing.assert_allclose(flm_roundtrip, flm, atol=1e-8, rtol=1e-8)
+
+
+@pytest.mark.parametrize("method", methods_to_test)
+def test_gl_even_longitude_inverse_matches_direct(
+    get_flm_and_precompute_kernel, method: str
+):
+    L = 6
+    nphi = 2 * L
+    spin = 1
+    flm, kernel = get_flm_and_precompute_kernel(
+        L, spin, "gl", False, method, "price-mcewen", forward=False
+    )
+    flm_input = torch.from_numpy(flm) if method == "torch" else flm
+
+    f = inverse(
+        flm_input,
+        L,
+        spin=spin,
+        kernel=kernel,
+        sampling="gl",
+        method=method,
+        nphi=nphi,
+    )
+    if method == "torch":
+        f = f.resolve_conj().numpy()
+    f_direct = base._inverse(flm, L, spin, "gl", method="direct", nphi=nphi)
+
+    np.testing.assert_allclose(f, f_direct, atol=1e-8, rtol=1e-8)
