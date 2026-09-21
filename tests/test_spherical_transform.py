@@ -239,7 +239,7 @@ def test_sampling_exceptions(flm_generator):
 @pytest.mark.parametrize("method", method_to_test)
 @pytest.mark.parametrize("reality", reality_to_test)
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-def test_gl_even_longitude_transforms(flm_generator, method: str, reality: bool):
+def test_gl_two_l_longitude_transforms(flm_generator, method: str, reality: bool):
     L = 6
     nphi = 2 * L
     spin = 0 if reality else 1
@@ -271,7 +271,7 @@ def test_gl_even_longitude_transforms(flm_generator, method: str, reality: bool)
 
 
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-def test_gl_even_longitude_fft_modes(flm_generator):
+def test_gl_two_l_longitude_fft_modes(flm_generator):
     L = 6
     nphi = 2 * L
     flm = flm_generator(L, spin=1)
@@ -286,7 +286,7 @@ def test_gl_even_longitude_fft_modes(flm_generator):
 
 @pytest.mark.parametrize("method", method_to_test)
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-def test_gl_even_longitude_inverse_matches_direct(flm_generator, method: str):
+def test_gl_two_l_longitude_inverse_matches_direct(flm_generator, method: str):
     L = 6
     nphi = 2 * L
     spin = 1
@@ -305,7 +305,7 @@ def test_gl_even_longitude_inverse_matches_direct(flm_generator, method: str):
 
 @pytest.mark.parametrize("method", method_to_test)
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-def test_gl_even_longitude_discards_even_nyquist_mode(method: str):
+def test_gl_two_l_longitude_discards_nyquist_mode(method: str):
     L = 6
     nphi = 2 * L
     f = np.tile((-1.0) ** np.arange(nphi), (L, 1))
@@ -320,7 +320,7 @@ def test_gl_even_longitude_discards_even_nyquist_mode(method: str):
 
 @pytest.mark.parametrize("method", method_to_test)
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-def test_gl_explicit_default_longitude_matches_default(flm_generator, method: str):
+def test_gl_default_longitude_equivalence(flm_generator, method: str):
     L = 6
     flm = flm_generator(L, spin=1)
     flm_input = torch.from_numpy(flm) if method == "torch" else flm
@@ -335,7 +335,7 @@ def test_gl_explicit_default_longitude_matches_default(flm_generator, method: st
     np.testing.assert_array_equal(f_default, f_explicit)
 
 
-def test_gl_even_longitude_torch_autograd(flm_generator):
+def test_gl_two_l_longitude_torch_autograd(flm_generator):
     L = 6
     nphi = 2 * L
     flm = torch.from_numpy(flm_generator(L, spin=1)).requires_grad_()
@@ -348,7 +348,7 @@ def test_gl_even_longitude_torch_autograd(flm_generator):
 
 
 @pytest.mark.slow
-def test_gl_even_longitude_torch_gradcheck(flm_generator):
+def test_gl_two_l_longitude_torch_gradcheck(flm_generator):
     L = 3
     nphi = 2 * L
     flm = torch.from_numpy(flm_generator(L)).requires_grad_()
@@ -369,7 +369,7 @@ def test_gl_even_longitude_torch_gradcheck(flm_generator):
     )
 
 
-def test_jax_ssht_rejects_even_gl_longitude(flm_generator):
+def test_jax_ssht_rejects_two_l_gl_longitude(flm_generator):
     L = 6
     nphi = 2 * L
     flm = flm_generator(L)
@@ -381,7 +381,7 @@ def test_jax_ssht_rejects_even_gl_longitude(flm_generator):
         spherical.forward(f, L, sampling="gl", method="jax_ssht")
 
 
-def test_gl_even_longitude_validates_input_shape():
+def test_gl_invalid_longitude_count():
     L = 6
     with pytest.raises(ValueError, match="GL input must"):
         spherical.forward(np.zeros((L, 2 * L + 1)), L, sampling="gl")

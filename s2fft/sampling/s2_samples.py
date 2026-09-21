@@ -16,6 +16,17 @@ def _validate_nphi(L: int, sampling: str, nphi: int | None) -> None:
         raise ValueError("GL nphi must be 2 * L - 1 or 2 * L.")
 
 
+def _validate_gl_input(f: np.ndarray, L: int) -> int:
+    """Validate a GL input and return its longitude count."""
+    nphi = f.shape[-1]
+    if nphi not in (2 * L - 1, 2 * L):
+        raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
+    expected_shape = (L, nphi)
+    if f.shape != expected_shape:
+        raise ValueError(f"Expected GL input shape {expected_shape}, got {f.shape}.")
+    return nphi
+
+
 def ntheta(L: int = None, sampling: str = "mw", nside: int = None) -> int:
     r"""
     Number of :math:`\theta` samples for sampling scheme at specified resolution.

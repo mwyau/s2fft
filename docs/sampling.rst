@@ -199,14 +199,6 @@ as commonly used for regular Gaussian grids. For the :math:`2L` grid, the
 longitude Nyquist mode lies outside the spherical-harmonic band-limit and is
 omitted.
 
-.. code-block:: python
-
-  import s2fft
-
-  L = 128
-  f = s2fft.inverse(flm, L, sampling="gl", nphi=2 * L)
-  flm = s2fft.forward(f, L, sampling="gl")
-
 Further information; `Gauss-Legendre (1986) <https://link.springer.com/article/10.1007/BF02519350>`_.
 
 .. _healpix:

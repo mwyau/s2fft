@@ -454,16 +454,7 @@ def forward(
     if method not in _forward_functions:
         raise ValueError(f"Method {method} not recognised.")
 
-    nphi = None
-    if sampling.lower() == "gl":
-        nphi = f.shape[-1]
-        if nphi not in (2 * L - 1, 2 * L):
-            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
-        expected_shape = (L, nphi)
-        if f.shape != expected_shape:
-            raise ValueError(
-                f"Expected GL input shape {expected_shape}, got {f.shape}."
-            )
+    nphi = f.shape[-1] if sampling.lower() == "gl" else None
 
     if spin >= 8 and method in ("numpy", "jax", "jax_cuda", "torch"):
         raise Warning("Recursive transform may provide lower precision beyond spin ~ 8")
@@ -485,8 +476,10 @@ def forward(
     if method == "jax_ssht":
         if sampling.lower() == "healpix":
             raise ValueError("SSHT does not support healpix sampling.")
-        if nphi == 2 * L:
-            raise ValueError("jax_ssht does not support 2L-longitude GL.")
+        if sampling.lower() == "gl":
+            nphi = samples._validate_gl_input(f, L)
+            if nphi == 2 * L:
+                raise ValueError("jax_ssht does not support 2L-longitude GL.")
         ssht_sampling = ["mw", "mwss", "dh", "gl"].index(sampling.lower())
         forward_kwargs.update(ssht_sampling=ssht_sampling, _ssht_backend=_ssht_backend)
     else:
@@ -553,14 +546,7 @@ def forward_numpy(
 
     """
     if sampling.lower() == "gl":
-        nphi = f.shape[-1]
-        if nphi not in (2 * L - 1, 2 * L):
-            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
-        expected_shape = (L, nphi)
-        if f.shape != expected_shape:
-            raise ValueError(
-                f"Expected GL input shape {expected_shape}, got {f.shape}."
-            )
+        samples._validate_gl_input(f, L)
     even_gl = sampling.lower() == "gl" and f.shape[-1] == 2 * L
 
     # Resample mw onto mwss and double resolution of both
@@ -718,14 +704,7 @@ def forward_jax(
 
     """
     if sampling.lower() == "gl":
-        nphi = f.shape[-1]
-        if nphi not in (2 * L - 1, 2 * L):
-            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
-        expected_shape = (L, nphi)
-        if f.shape != expected_shape:
-            raise ValueError(
-                f"Expected GL input shape {expected_shape}, got {f.shape}."
-            )
+        samples._validate_gl_input(f, L)
     even_gl = sampling.lower() == "gl" and f.shape[-1] == 2 * L
 
     # Resample mw onto mwss and double resolution of both

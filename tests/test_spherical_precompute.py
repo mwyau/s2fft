@@ -349,7 +349,7 @@ def test_inverse_transform_unrecognised_method_raises():
 
 @pytest.mark.parametrize("method", methods_to_test)
 @pytest.mark.parametrize("reality", reality_to_test)
-def test_gl_even_longitude_transforms(
+def test_gl_two_l_longitude_transforms(
     get_flm_and_precompute_kernel, method: str, reality: bool
 ):
     L = 6
@@ -382,7 +382,7 @@ def test_gl_even_longitude_transforms(
         sampling="gl",
         reality=reality,
         method=method,
-        iter=1,
+        iter=0,
     )
     if method == "torch":
         flm_roundtrip = flm_roundtrip.resolve_conj().numpy()
@@ -391,7 +391,7 @@ def test_gl_even_longitude_transforms(
 
 
 @pytest.mark.parametrize("method", methods_to_test)
-def test_gl_even_longitude_inverse_matches_direct(
+def test_gl_two_l_longitude_inverse_matches_direct(
     get_flm_and_precompute_kernel, method: str
 ):
     L = 6

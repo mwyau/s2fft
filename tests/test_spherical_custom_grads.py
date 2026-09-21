@@ -347,7 +347,7 @@ def test_healpix_c_backend_forward_custom_gradients(
     check_grads(func, (f,), order=2, modes=("fwd", "rev"))
 
 
-def test_gl_even_longitude_reverse_mode_gradients(flm_generator):
+def test_gl_two_l_longitude_reverse_mode_gradients(flm_generator):
     L = 6
     nphi = 2 * L
     flm = flm_generator(L, spin=1)

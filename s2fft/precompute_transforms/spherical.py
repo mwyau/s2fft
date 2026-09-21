@@ -74,7 +74,7 @@ def inverse(
             + "Defering to complex transform.",
             stacklevel=2,
         )
-    kernel_kwargs = {
+    common_kwargs = {
         "L": L,
         "sampling": sampling,
         "reality": reality,
@@ -82,11 +82,11 @@ def inverse(
         "nside": nside,
     }
     kernel = (
-        _kernel_functions[method](forward=False, **kernel_kwargs)
+        _kernel_functions[method](forward=False, **common_kwargs)
         if kernel is None
         else kernel
     )
-    return _inverse_functions[method](flm, kernel, nphi=nphi, **kernel_kwargs)
+    return _inverse_functions[method](flm, kernel, nphi=nphi, **common_kwargs)
 
 
 def inverse_transform(
@@ -309,15 +309,6 @@ def forward(
     """
     if method not in _forward_functions:
         raise ValueError(f"Method {method} not recognised.")
-    if sampling.lower() == "gl":
-        nphi = f.shape[-1]
-        if nphi not in (2 * L - 1, 2 * L):
-            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
-        expected_shape = (L, nphi)
-        if f.shape != expected_shape:
-            raise ValueError(
-                f"Expected GL input shape {expected_shape}, got {f.shape}."
-            )
     if reality and spin != 0:
         reality = False
         warn(
@@ -325,7 +316,7 @@ def forward(
             + "Defering to complex transform.",
             stacklevel=2,
         )
-    kernel_kwargs = {
+    common_kwargs = {
         "L": L,
         "sampling": sampling,
         "reality": reality,
@@ -333,22 +324,22 @@ def forward(
         "nside": nside,
     }
     kernel = (
-        _kernel_functions[method](forward=True, **kernel_kwargs)
+        _kernel_functions[method](forward=True, **common_kwargs)
         if kernel is None
         else kernel
     )
     if iter == 0:
-        return _forward_functions[method](f, kernel, **kernel_kwargs)
+        return _forward_functions[method](f, kernel, **common_kwargs)
     else:
-        inverse_kernel = _kernel_functions[method](forward=False, **kernel_kwargs)
-        inverse_kwargs = kernel_kwargs.copy()
+        inverse_kernel = _kernel_functions[method](forward=False, **common_kwargs)
+        inverse_kwargs = common_kwargs.copy()
         if sampling.lower() == "gl":
             inverse_kwargs["nphi"] = f.shape[-1]
         return iterative_refinement.forward_with_iterative_refinement(
             f=f,
             n_iter=iter,
             forward_function=partial(
-                _forward_functions[method], kernel=kernel, **kernel_kwargs
+                _forward_functions[method], kernel=kernel, **common_kwargs
             ),
             backward_function=partial(
                 _inverse_functions[method], kernel=inverse_kernel, **inverse_kwargs
@@ -392,14 +383,7 @@ def forward_transform(
 
     """
     if sampling.lower() == "gl":
-        nphi = f.shape[-1]
-        if nphi not in (2 * L - 1, 2 * L):
-            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
-        expected_shape = (L, nphi)
-        if f.shape != expected_shape:
-            raise ValueError(
-                f"Expected GL input shape {expected_shape}, got {f.shape}."
-            )
+        samples._validate_gl_input(f, L)
     even_gl = sampling.lower() == "gl" and f.shape[-1] == 2 * L
 
     if sampling.lower() == "mw":
@@ -480,14 +464,7 @@ def forward_transform_jax(
 
     """
     if sampling.lower() == "gl":
-        nphi = f.shape[-1]
-        if nphi not in (2 * L - 1, 2 * L):
-            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
-        expected_shape = (L, nphi)
-        if f.shape != expected_shape:
-            raise ValueError(
-                f"Expected GL input shape {expected_shape}, got {f.shape}."
-            )
+        samples._validate_gl_input(f, L)
     even_gl = sampling.lower() == "gl" and f.shape[-1] == 2 * L
 
     if sampling.lower() == "mw":

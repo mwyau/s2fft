@@ -177,7 +177,7 @@ def test_L_lower_exception(flm_generator, L: int):
 
 @pytest.mark.parametrize("method", method_to_test)
 @pytest.mark.parametrize("reality", reality_to_test)
-def test_gl_even_longitude_transforms(flm_generator, method: str, reality: bool):
+def test_gl_two_l_longitude_transforms(flm_generator, method: str, reality: bool):
     L = 6
     nphi = 2 * L
     spin = 0 if reality else 1

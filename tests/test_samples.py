@@ -178,32 +178,22 @@ def test_samples_exceptions():
         samples.t2theta(t=0, sampling="mw")
 
 
-@pytest.mark.parametrize("nphi", [11, 12])
-def test_gl_even_longitude_samples(nphi: int):
+@pytest.mark.parametrize("nphi", [None, 12])
+def test_gl_longitude_samples(nphi: int | None):
     L = 6
+    nphi_expected = 2 * L - 1 if nphi is None else nphi
 
-    assert samples.nphi_equiang(L, "gl", nphi) == nphi
-    assert samples.f_shape(L, "gl", nphi=nphi) == (L, nphi)
-    expected_phis = 2 * np.pi * np.arange(nphi) / nphi
+    assert samples.nphi_equiang(L, "gl", nphi) == nphi_expected
+    assert samples.f_shape(L, "gl", nphi=nphi) == (L, nphi_expected)
+    expected_phis = 2 * np.pi * np.arange(nphi_expected) / nphi_expected
     np.testing.assert_allclose(samples.phis_equiang(L, "gl", nphi), expected_phis)
     np.testing.assert_allclose(
-        samples.p2phi_equiang(L, np.arange(nphi), "gl", nphi), expected_phis
-    )
-
-
-def test_gl_even_longitude_default_equivalence():
-    L = 6
-    nphi = 2 * L - 1
-
-    assert samples.nphi_equiang(L, "gl") == samples.nphi_equiang(L, "gl", nphi)
-    assert samples.f_shape(L, "gl") == samples.f_shape(L, "gl", nphi=nphi)
-    np.testing.assert_array_equal(
-        samples.phis_equiang(L, "gl"), samples.phis_equiang(L, "gl", nphi)
+        samples.p2phi_equiang(L, np.arange(nphi_expected), "gl", nphi), expected_phis
     )
 
 
 @pytest.mark.parametrize("nphi", [True, np.bool_(True), 10.0, 10, 13])
-def test_gl_even_longitude_invalid_nphi(nphi):
+def test_gl_invalid_nphi(nphi):
     with pytest.raises(ValueError):
         samples.nphi_equiang(6, "gl", nphi)
 

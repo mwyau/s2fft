@@ -248,14 +248,7 @@ def _forward(
 
     """
     if sampling.lower() == "gl":
-        nphi = f.shape[-1]
-        if nphi not in (2 * L - 1, 2 * L):
-            raise ValueError("GL input must have 2 * L - 1 or 2 * L longitude samples.")
-        expected_shape = (L, nphi)
-        if f.shape != expected_shape:
-            raise ValueError(
-                f"Expected GL input shape {expected_shape}, got {f.shape}."
-            )
+        samples._validate_gl_input(f, L)
     else:
         assert f.shape == samples.f_shape(L, sampling, nside)
     assert L > 0
@@ -344,13 +337,9 @@ def _compute_inverse_direct(
         np.ndarray: Signal on the sphere.
 
     """
-    if sampling.lower() == "healpix":
-        f_shape = samples.f_shape(L, sampling, nside)
-    else:
+    if sampling.lower() != "healpix":
         phis_ring = samples.phis_equiang(L, sampling, nphi)
-        f_shape = (len(thetas), len(phis_ring))
-
-    f = np.zeros(f_shape, dtype=np.complex128)
+    f = np.zeros(samples.f_shape(L, sampling, nside, nphi=nphi), dtype=np.complex128)
 
     for t, theta in enumerate(thetas):
         if sampling.lower() == "healpix":
@@ -447,12 +436,9 @@ def _compute_inverse_sov(
                     (-1) ** spin * elfactor * dl[m + L - 1] * flm[el, m + L - 1]
                 )
 
-    if sampling.lower() == "healpix":
-        f_shape = samples.f_shape(L, sampling, nside)
-    else:
+    if sampling.lower() != "healpix":
         phis_ring = samples.phis_equiang(L, sampling, nphi)
-        f_shape = (len(thetas), len(phis_ring))
-    f = np.zeros(f_shape, dtype=np.complex128)
+    f = np.zeros(samples.f_shape(L, sampling, nside, nphi=nphi), dtype=np.complex128)
     for t, theta in enumerate(thetas):
         if sampling.lower() == "healpix":
             phis_ring = samples.phis_ring(t, nside)
@@ -557,6 +543,7 @@ def _compute_inverse_sov_fft(
         f = hp.healpix_ifft(ftm, L, nside, "numpy", reality)
     else:
         nphi_out = samples.nphi_equiang(L, sampling, nphi)
+        even_gl = sampling.lower() == "gl" and nphi_out == 2 * L
         if reality:
             f = np.fft.irfft(
                 ftm[:, L - 1 + m_offset :],
@@ -565,7 +552,7 @@ def _compute_inverse_sov_fft(
                 norm="forward",
             )
         else:
-            if sampling.lower() == "gl" and nphi == 2 * L:
+            if even_gl:
                 ftm = np.pad(ftm, ((0, 0), (1, 0)))
             f = np.fft.ifft(np.fft.ifftshift(ftm, axes=1), axis=1, norm="forward")
 
@@ -639,6 +626,7 @@ def _compute_inverse_sov_fft_vectorized(
         f = hp.healpix_ifft(ftm, L, nside, "numpy", reality)
     else:
         nphi_out = samples.nphi_equiang(L, sampling, nphi)
+        even_gl = sampling.lower() == "gl" and nphi_out == 2 * L
         if reality:
             f = np.fft.irfft(
                 ftm[:, L - 1 + m_offset :],
@@ -647,7 +635,7 @@ def _compute_inverse_sov_fft_vectorized(
                 norm="forward",
             )
         else:
-            if sampling.lower() == "gl" and nphi == 2 * L:
+            if even_gl:
                 ftm = np.pad(ftm, ((0, 0), (1, 0)))
             f = np.fft.ifft(np.fft.ifftshift(ftm, axes=1), axis=1, norm="forward")
 
