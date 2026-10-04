@@ -6,7 +6,7 @@ import numpy as np
 from s2fft import recursions
 from s2fft.sampling import s2_samples as samples
 from s2fft.utils import healpix_ffts as hp
-from s2fft.utils import iterative_refinement, quadrature, resampling
+from s2fft.utils import iterative_refinement, longitude, quadrature, resampling
 
 
 def inverse(
@@ -17,6 +17,7 @@ def inverse(
     nside: int = None,
     reality: bool = False,
     L_lower: int = 0,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute inverse spherical harmonic transform.
@@ -43,6 +44,9 @@ def inverse(
         L_lower (int, optional): Harmonic lower-bound. Transform will only be computed
             for :math:`\texttt{L_lower} \leq \ell < \texttt{L}`. Defaults to 0.
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+
     Returns:
         np.ndarray: Signal on the sphere.
 
@@ -56,6 +60,7 @@ def inverse(
         method="sov_fft_vectorized",
         reality=reality,
         L_lower=L_lower,
+        nphi=nphi,
     )
 
 
@@ -68,6 +73,7 @@ def _inverse(
     nside: int = None,
     reality: bool = False,
     L_lower: int = 0,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute inverse spherical harmonic transform using a specified method.
@@ -96,10 +102,16 @@ def _inverse(
         L_lower (int, optional): Harmonic lower-bound. Transform will only be computed
             for :math:`\texttt{L_lower} \leq \ell < \texttt{L}`. Defaults to 0.
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+
     Returns:
         np.ndarray: Signal on the sphere.
 
     """
+    if nphi is not None:
+        samples.nphi_equiang(L, sampling, nphi)
+
     assert flm.shape == samples.flm_shape(L)
     assert L > 0
     assert 0 <= L_lower < L
@@ -128,6 +140,7 @@ def _inverse(
         nside=nside,
         reality=reality,
         L_lower=L_lower,
+        nphi=nphi,
     )
 
 
@@ -147,7 +160,8 @@ def forward(
     Uses a vectorised separation of variables method with np.fft.
 
     Args:
-        f (np.ndarray): Signal on the sphere.
+        f (np.ndarray): Signal on the sphere. For GL sampling, the longitude count is inferred
+            from ``f.shape[-1]`` and must be at least :math:`2L-1`.
 
         L (int): Harmonic band-limit.
 
@@ -192,7 +206,11 @@ def forward(
             f,
             n_iter=iter,
             forward_function=partial(_forward, **common_kwargs),
-            backward_function=partial(_inverse, **common_kwargs),
+            backward_function=partial(
+                _inverse,
+                nphi=f.shape[-1] if sampling.lower() == "gl" else None,
+                **common_kwargs,
+            ),
         )
 
 
@@ -210,7 +228,8 @@ def _forward(
     Compute forward spherical harmonic transform using a specified method.
 
     Args:
-        f (np.ndarray): Signal on the sphere.
+        f (np.ndarray): Signal on the sphere. For GL sampling, the longitude count is inferred
+            from ``f.shape[-1]`` and must be at least :math:`2L-1`.
 
         L (int): Harmonic band-limit.
 
@@ -237,7 +256,8 @@ def _forward(
         np.ndarray: Spherical harmonic coefficients.
 
     """
-    assert f.shape == samples.f_shape(L, sampling, nside)
+    nphi = longitude._validate_gl_shape(f, L) if sampling.lower() == "gl" else None
+    assert f.shape == samples.f_shape(L, sampling, nside, nphi)
     assert L > 0
     assert 0 <= L_lower < L
 
@@ -263,6 +283,8 @@ def _forward(
     # Don't need to include spin in weights (even for spin signals)
     # since accounted for already in periodic extension and upsampling.
     weights = quadrature.quad_weights_transform(L, sampling, 0, nside)
+    if sampling.lower() == "gl" and nphi != 2 * L - 1 and method in ("direct", "sov"):
+        weights = weights * ((2 * L - 1) / nphi)
 
     transform_methods = {
         "direct": _compute_forward_direct,
@@ -292,6 +314,7 @@ def _compute_inverse_direct(
     nside: int,
     reality: bool,
     L_lower: int,
+    nphi: int | None = None,
 ):
     r"""
     Compute inverse spherical harmonic transform directly.
@@ -317,14 +340,17 @@ def _compute_inverse_direct(
         L_lower (int): Harmonic lower-bound. Transform will only be computed
             for :math:`\texttt{L_lower} \leq \ell < \texttt{L}`.  Defaults to 0.
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+
     Returns:
         np.ndarray: Signal on the sphere.
 
     """
     if sampling.lower() != "healpix":
-        phis_ring = samples.phis_equiang(L, sampling)
+        phis_ring = samples.phis_equiang(L, sampling, nphi)
 
-    f = np.zeros(samples.f_shape(L, sampling, nside), dtype=np.complex128)
+    f = np.zeros(samples.f_shape(L, sampling, nside, nphi), dtype=np.complex128)
 
     for t, theta in enumerate(thetas):
         if sampling.lower() == "healpix":
@@ -378,6 +404,7 @@ def _compute_inverse_sov(
     nside: int,
     reality: bool,
     L_lower: int,
+    nphi: int | None = None,
 ):
     r"""
     Compute inverse spherical harmonic transform by separation of variables with a
@@ -404,6 +431,9 @@ def _compute_inverse_sov(
         L_lower (int): Harmonic lower-bound. Transform will only be computed
             for :math:`\texttt{L_lower} \leq \ell < \texttt{L}`.  Defaults to 0.
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+
     Returns:
         np.ndarray: Signal on the sphere.
 
@@ -420,9 +450,9 @@ def _compute_inverse_sov(
                     (-1) ** spin * elfactor * dl[m + L - 1] * flm[el, m + L - 1]
                 )
 
-    f = np.zeros(samples.f_shape(L, sampling, nside), dtype=np.complex128)
+    f = np.zeros(samples.f_shape(L, sampling, nside, nphi), dtype=np.complex128)
     if sampling.lower() != "healpix":
-        phis_ring = samples.phis_equiang(L, sampling)
+        phis_ring = samples.phis_equiang(L, sampling, nphi)
     for t, theta in enumerate(thetas):
         if sampling.lower() == "healpix":
             phis_ring = samples.phis_ring(t, nside)
@@ -452,6 +482,7 @@ def _compute_inverse_sov_fft(
     nside: int,
     reality: bool,
     L_lower: int,
+    nphi: int | None = None,
 ):
     r"""
     Compute inverse spherical harmonic transform by separation of variables with a
@@ -477,6 +508,9 @@ def _compute_inverse_sov_fft(
 
         L_lower (int): Harmonic lower-bound. Transform will only be computed
             for :math:`\texttt{L_lower} \leq \ell < \texttt{L}`.  Defaults to 0.
+
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
 
     Returns:
         np.ndarray: Signal on the sphere.
@@ -520,6 +554,8 @@ def _compute_inverse_sov_fft(
 
                 ftm[t, m + L - 1 + m_offset] += val
 
+    if sampling.lower() == "gl" and nphi not in (None, 2 * L - 1):
+        return longitude._inverse_gl(ftm, L, nphi, reality)
     if sampling.lower() == "healpix":
         f = hp.healpix_ifft(ftm, L, nside, "numpy", reality)
     else:
@@ -545,6 +581,7 @@ def _compute_inverse_sov_fft_vectorized(
     nside: int,
     reality: bool,
     L_lower: int,
+    nphi: int | None = None,
 ):
     r"""
     A vectorized function to compute inverse spherical harmonic transform by
@@ -571,6 +608,9 @@ def _compute_inverse_sov_fft_vectorized(
         L_lower (int): Harmonic lower-bound. Transform will only be computed
             for :math:`\texttt{L_lower} \leq \ell < \texttt{L}`.  Defaults to 0.
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+
     Returns:
         np.ndarray: Signal on the sphere.
 
@@ -596,6 +636,8 @@ def _compute_inverse_sov_fft_vectorized(
             ftm[t, m_start_ind + m_offset : 2 * L - 1 + m_offset] += val
 
     ftm *= (-1) ** (spin)
+    if sampling.lower() == "gl" and nphi not in (None, 2 * L - 1):
+        return longitude._inverse_gl(ftm, L, nphi, reality)
     if sampling.lower() == "healpix":
         f = hp.healpix_ifft(ftm, L, nside, "numpy", reality)
     else:
@@ -656,7 +698,9 @@ def _compute_forward_direct(
     flm = np.zeros(samples.flm_shape(L), dtype=np.complex128)
 
     if sampling.lower() != "healpix":
-        phis_ring = samples.phis_equiang(L, sampling)
+        phis_ring = samples.phis_equiang(
+            L, sampling, f.shape[-1] if sampling.lower() == "gl" else None
+        )
 
     for t, theta in enumerate(thetas):
         if sampling.lower() == "healpix":
@@ -746,7 +790,9 @@ def _compute_forward_sov(
 
     """
     if sampling.lower() != "healpix":
-        phis_ring = samples.phis_equiang(L, sampling)
+        phis_ring = samples.phis_equiang(
+            L, sampling, f.shape[-1] if sampling.lower() == "gl" else None
+        )
 
     ftm = np.zeros((len(thetas), 2 * L - 1), dtype=np.complex128)
     for t, theta in enumerate(thetas):
@@ -846,7 +892,9 @@ def _compute_forward_sov_fft(
 
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
 
-    if sampling.lower() == "healpix":
+    if sampling.lower() == "gl" and f.shape[-1] != 2 * L - 1:
+        ftm = longitude._forward_gl(f, L, reality)
+    elif sampling.lower() == "healpix":
         ftm = hp.healpix_fft(f, L, nside, "numpy", reality)
     else:
         if reality:
@@ -964,7 +1012,9 @@ def _compute_forward_sov_fft_vectorized(
     if reality:
         m_conj = (-1) ** (np.arange(1, L) % 2)
 
-    if sampling.lower() == "healpix":
+    if sampling.lower() == "gl" and f.shape[-1] != 2 * L - 1:
+        ftm = longitude._forward_gl(f, L, reality)
+    elif sampling.lower() == "healpix":
         ftm = hp.healpix_fft(f, L, nside, "numpy", reality)
     else:
         if reality:

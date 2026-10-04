@@ -11,6 +11,7 @@ from s2fft.transforms import otf_recursions as otf
 from s2fft.utils import healpix_ffts as hp
 from s2fft.utils import (
     iterative_refinement,
+    longitude,
     quadrature,
     quadrature_jax,
     resampling,
@@ -31,6 +32,7 @@ def inverse(
     spmd: bool = False,
     L_lower: int = 0,
     _ssht_backend: int = 1,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Wrapper for the inverse spin-spherical harmonic transform.
@@ -69,6 +71,10 @@ def inverse(
             (set to 0) recursions or pick up ducc0 (set to 1) accelerated experimental
             backend. Use with caution.
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+            Harmonic coefficient and latitude-kernel shapes are unchanged.
+
     Raises:
         ValueError: Transform method not recognised.
 
@@ -83,6 +89,9 @@ def inverse(
         recover acceleration by the number of devices.
 
     """
+    if nphi is not None:
+        samples.nphi_equiang(L, sampling, nphi)
+
     if method not in _inverse_functions:
         raise ValueError(f"Method {method} not recognised.")
 
@@ -91,7 +100,9 @@ def inverse(
 
     inverse_kwargs = {"flm": flm, "L": L}
     if method in ("numpy", "jax", "jax_cuda", "torch"):
-        inverse_kwargs.update(sampling=sampling, precomps=precomps, L_lower=L_lower)
+        inverse_kwargs.update(
+            sampling=sampling, precomps=precomps, L_lower=L_lower, nphi=nphi
+        )
     if method in ("jax", "jax_cuda", "torch"):
         inverse_kwargs["spmd"] = spmd
     if method == "jax_healpy":
@@ -102,6 +113,8 @@ def inverse(
     if method == "jax_ssht":
         if sampling.lower() == "healpix":
             raise ValueError("SSHT does not support healpix sampling.")
+        if nphi is not None and nphi != 2 * L - 1:
+            raise ValueError("Custom GL nphi is not supported by jax_ssht.")
         ssht_sampling = ["mw", "mwss", "dh", "gl"].index(sampling.lower())
         inverse_kwargs.update(ssht_sampling=ssht_sampling, _ssht_backend=_ssht_backend)
     else:
@@ -119,6 +132,7 @@ def inverse_numpy(
     reality: bool = False,
     precomps: list = None,
     L_lower: int = 0,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute the inverse spin-spherical harmonic transform (numpy).
@@ -150,10 +164,17 @@ def inverse_numpy(
         L_lower (int, optional): Harmonic lower-bound. Transform will only be computed
             for :math:`\texttt{L_lower} \leq \ell < \texttt{L}`. Defaults to 0.
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+            Harmonic coefficient and latitude-kernel shapes are unchanged.
+
     Returns:
         np.ndarray: Signal on the sphere.
 
     """
+    if nphi is not None:
+        samples.nphi_equiang(L, sampling, nphi)
+
     # Define latitudinal sample positions and Fourier offsets
     thetas = samples.thetas(L, sampling, nside)
     m_offset = 1 if sampling.lower() in ["mwss", "healpix"] else 0
@@ -191,6 +212,8 @@ def inverse_numpy(
 
     # Perform longitundal Fast Fourier Transforms
     ftm *= (-1) ** spin
+    if sampling.lower() == "gl" and nphi not in (None, 2 * L - 1):
+        return longitude._inverse_gl(ftm, L, nphi, reality, np)
     if sampling.lower() == "healpix":
         if reality:
             ftm[:, m_offset : L - 1 + m_offset] = np.flip(
@@ -209,7 +232,7 @@ def inverse_numpy(
             return np.fft.ifft(np.fft.ifftshift(ftm, axes=1), axis=1, norm="forward")
 
 
-@partial(jit, static_argnums=(1, 3, 4, 5, 7, 8, 9))
+@partial(jit, static_argnums=(1, 3, 4, 5, 7, 8, 9, 10))
 def inverse_jax(
     flm: jnp.ndarray,
     L: int,
@@ -221,6 +244,7 @@ def inverse_jax(
     spmd: bool = False,
     L_lower: int = 0,
     use_healpix_custom_primitive: bool = False,
+    nphi: int | None = None,
 ) -> jnp.ndarray:
     r"""
     Compute the inverse spin-spherical harmonic transform (JAX).
@@ -262,6 +286,10 @@ def inverse_jax(
             primitive reduces long compilation times when just-in-time compiling.
             Defaults to `False`.
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+            Harmonic coefficient and latitude-kernel shapes are unchanged.
+
     Returns:
         jnp.ndarray: Signal on the sphere.
 
@@ -273,6 +301,9 @@ def inverse_jax(
         recover acceleration by the number of devices.
 
     """
+    if nphi is not None:
+        samples.nphi_equiang(L, sampling, nphi)
+
     # Define latitudinal sample positions and Fourier offsets
     thetas = samples.thetas(L, sampling, nside)
     m_offset = 1 if sampling.lower() in ["mwss", "healpix"] else 0
@@ -316,6 +347,8 @@ def inverse_jax(
         ftm = ftm.at[:, m_offset : L - 1 + m_offset].set(
             jnp.flip(jnp.conj(ftm[:, L - 1 + m_offset + 1 :]), axis=-1)
         )
+    if sampling.lower() == "gl" and nphi not in (None, 2 * L - 1):
+        return longitude._inverse_gl(ftm, L, nphi, reality, jnp)
     if sampling.lower() == "healpix":
         if use_healpix_custom_primitive:
             return hp.healpix_ifft(ftm, L, nside, "cuda")
@@ -348,7 +381,8 @@ def forward(
     Wrapper for the forward spin-spherical harmonic transform.
 
     Args:
-        f (np.ndarray): Signal on the sphere.
+        f (np.ndarray): Signal on the sphere. For GL sampling, the physical
+            longitude count is inferred from ``f.shape[-1]`` and must be at least :math:`2L-1`.
 
         L (int): Harmonic band-limit.
 
@@ -403,6 +437,9 @@ def forward(
         recover acceleration by the number of devices.
 
     """
+    if sampling.lower() == "gl":
+        longitude._validate_gl_shape(f, L)
+
     if method not in _forward_functions:
         raise ValueError(f"Method {method} not recognised.")
 
@@ -426,6 +463,8 @@ def forward(
     if method == "jax_ssht":
         if sampling.lower() == "healpix":
             raise ValueError("SSHT does not support healpix sampling.")
+        if sampling.lower() == "gl" and f.shape[-1] != 2 * L - 1:
+            raise ValueError("Custom GL nphi is not supported by jax_ssht.")
         ssht_sampling = ["mw", "mwss", "dh", "gl"].index(sampling.lower())
         forward_kwargs.update(ssht_sampling=ssht_sampling, _ssht_backend=_ssht_backend)
     else:
@@ -435,6 +474,8 @@ def forward(
         f = forward_kwargs.pop("f")
         inverse_kwargs = forward_kwargs.copy()
         inverse_kwargs.pop("precomps")
+        if sampling.lower() == "gl" and method != "jax_ssht":
+            inverse_kwargs["nphi"] = f.shape[-1]
         return iterative_refinement.forward_with_iterative_refinement(
             f=f,
             n_iter=iter,
@@ -463,7 +504,8 @@ def forward_numpy(
     function is theoretically :math:`\mathcal{O}(L^2)`.
 
     Args:
-        f (np.ndarray): Signal on the sphere
+        f (np.ndarray): Signal on the sphere. For GL sampling, the physical
+            longitude count is inferred from ``f.shape[-1]`` and must be at least :math:`2L-1`.
 
         L (int): Harmonic band-limit.
 
@@ -489,6 +531,9 @@ def forward_numpy(
         np.ndarray: Spherical harmonic coefficients
 
     """
+    if sampling.lower() == "gl":
+        longitude._validate_gl_shape(f, L)
+
     # Resample mw onto mwss and double resolution of both
     if sampling.lower() == "mw":
         f = resampling.mw_to_mwss(f, L, spin)
@@ -506,7 +551,9 @@ def forward_numpy(
     L0 = L_lower
 
     # Perform longitundal Fast Fourier Transforms
-    if sampling.lower() == "healpix":
+    if sampling.lower() == "gl" and f.shape[-1] != 2 * L - 1:
+        ftm = longitude._forward_gl(f, L, reality, np)
+    elif sampling.lower() == "healpix":
         ftm = hp.healpix_fft(f, L, nside, "numpy", reality)
     else:
         if reality:
@@ -591,7 +638,8 @@ def forward_jax(
     :func:`~forward_numpy`.
 
     Args:
-        f (jnp.ndarray): Signal on the sphere
+        f (jnp.ndarray): Signal on the sphere. For GL sampling, the physical
+            longitude count is inferred from ``f.shape[-1]`` and must be at least :math:`2L-1`.
 
         L (int): Harmonic band-limit.
 
@@ -633,6 +681,9 @@ def forward_jax(
         recover acceleration by the number of devices.
 
     """
+    if sampling.lower() == "gl":
+        longitude._validate_gl_shape(f, L)
+
     # Resample mw onto mwss and double resolution of both
     if sampling.lower() == "mw":
         f = resampling_jax.mw_to_mwss(f, L, spin)
@@ -649,7 +700,9 @@ def forward_jax(
     m_start_ind = L - 1 if reality else 0
 
     # Perform longitundal Fast Fourier Transforms
-    if sampling.lower() == "healpix":
+    if sampling.lower() == "gl" and f.shape[-1] != 2 * L - 1:
+        ftm = longitude._forward_gl(f, L, reality, jnp)
+    elif sampling.lower() == "healpix":
         if use_healpix_custom_primitive:
             ftm = hp.healpix_fft(f, L, nside, "cuda", reality)
         else:

@@ -10,6 +10,7 @@ from s2fft.sampling import s2_samples as samples
 from s2fft.utils import healpix_ffts as hp
 from s2fft.utils import (
     iterative_refinement,
+    longitude,
     resampling,
     resampling_jax,
     torch_wrapper,
@@ -26,6 +27,7 @@ def inverse(
     reality: bool = False,
     method: str = "jax",
     nside: int | None = None,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute the inverse spherical harmonic transform via precompute.
@@ -52,6 +54,10 @@ def inverse(
         nside (int): HEALPix Nside resolution parameter.  Only required
             if sampling="healpix".
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+            Precomputed kernels do not depend on this count.
+
     Raises:
         ValueError: Transform method not recognised.
 
@@ -61,6 +67,9 @@ def inverse(
         np.ndarray: Pixel-space coefficients with shape.
 
     """
+    if nphi is not None:
+        samples.nphi_equiang(L, sampling, nphi)
+
     if method not in _inverse_functions:
         raise ValueError(f"Method {method} not recognised.")
     if reality and spin != 0:
@@ -82,7 +91,7 @@ def inverse(
         if kernel is None
         else kernel
     )
-    return _inverse_functions[method](flm, kernel, **common_kwargs)
+    return _inverse_functions[method](flm, kernel, nphi=nphi, **common_kwargs)
 
 
 def inverse_transform(
@@ -93,6 +102,7 @@ def inverse_transform(
     reality: bool,
     spin: int,
     nside: int,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute the forward spherical harmonic transform via precompute (vectorized
@@ -116,10 +126,17 @@ def inverse_transform(
         nside (int): HEALPix Nside resolution parameter.  Only required
             if sampling="healpix".
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+            Precomputed kernels do not depend on this count.
+
     Returns:
         np.ndarray: Pixel-space coefficients.
 
     """
+    if nphi is not None:
+        samples.nphi_equiang(L, sampling, nphi)
+
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
     m_start_ind = L - 1 if reality else 0
 
@@ -128,6 +145,9 @@ def inverse_transform(
         "...tlm, ...lm -> ...tm", kernel, flm[:, m_start_ind:]
     )
     ftm *= (-1) ** (spin)
+
+    if sampling.lower() == "gl" and nphi not in (None, 2 * L - 1):
+        return longitude._inverse_gl(ftm, L, nphi, reality, np)
 
     if sampling.lower() == "healpix":
         if reality:
@@ -150,7 +170,7 @@ def inverse_transform(
     return f
 
 
-@partial(jit, static_argnums=(2, 3, 4, 5, 6))
+@partial(jit, static_argnums=(2, 3, 4, 5, 6, 7))
 def inverse_transform_jax(
     flm: jnp.ndarray,
     kernel: jnp.ndarray,
@@ -159,6 +179,7 @@ def inverse_transform_jax(
     reality: bool,
     spin: int,
     nside: int,
+    nphi: int | None = None,
 ) -> jnp.ndarray:
     r"""
     Compute the inverse spherical harmonic transform via precompute (JAX
@@ -182,10 +203,17 @@ def inverse_transform_jax(
         nside (int): HEALPix Nside resolution parameter.  Only required
             if sampling="healpix".
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+            Precomputed kernels do not depend on this count.
+
     Returns:
         jnp.ndarray: Pixel-space coefficients with shape.
 
     """
+    if nphi is not None:
+        samples.nphi_equiang(L, sampling, nphi)
+
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
     m_start_ind = L - 1 if reality else 0
 
@@ -201,6 +229,9 @@ def inverse_transform_jax(
         )
     )
     ftm *= (-1) ** spin
+    if sampling.lower() == "gl" and nphi not in (None, 2 * L - 1):
+        return longitude._inverse_gl(ftm, L, nphi, reality, jnp)
+
     if sampling.lower() == "healpix":
         if reality:
             ftm = ftm.at[:, m_offset : m_start_ind + m_offset].set(
@@ -241,7 +272,8 @@ def forward(
     Compute the forward spherical harmonic transform via precompute.
 
     Args:
-        f (np.ndarray): Signal on the sphere.
+        f (np.ndarray): Signal on the sphere. For GL sampling, the longitude count
+            is inferred from ``f.shape[-1]`` and must be at least :math:`2L-1`.
 
         L (int): Harmonic band-limit.
 
@@ -277,6 +309,9 @@ def forward(
         np.ndarray: Spherical harmonic coefficients.
 
     """
+    if sampling.lower() == "gl":
+        longitude._validate_gl_shape(f, L)
+
     if method not in _forward_functions:
         raise ValueError(f"Method {method} not recognised.")
     if reality and spin != 0:
@@ -309,7 +344,10 @@ def forward(
                 _forward_functions[method], kernel=kernel, **common_kwargs
             ),
             backward_function=partial(
-                _inverse_functions[method], kernel=inverse_kernel, **common_kwargs
+                _inverse_functions[method],
+                kernel=inverse_kernel,
+                nphi=f.shape[-1] if sampling.lower() == "gl" else None,
+                **common_kwargs,
             ),
         )
 
@@ -328,7 +366,8 @@ def forward_transform(
     implementation).
 
     Args:
-        f (np.ndarray): Signal on the sphere.
+        f (np.ndarray): Signal on the sphere. For GL sampling, the longitude count
+            is inferred from ``f.shape[-1]`` and must be at least :math:`2L-1`.
 
         kernel (np.ndarray): Wigner-d kernel.
 
@@ -349,6 +388,9 @@ def forward_transform(
         np.ndarray: Pixel-space coefficients.
 
     """
+    if sampling.lower() == "gl":
+        longitude._validate_gl_shape(f, L)
+
     if sampling.lower() == "mw":
         f = resampling.mw_to_mwss(f, L, spin)
 
@@ -359,7 +401,9 @@ def forward_transform(
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
     m_start_ind = L - 1 if reality else 0
 
-    if sampling.lower() == "healpix":
+    if sampling.lower() == "gl" and f.shape[-1] != 2 * L - 1:
+        ftm = longitude._forward_gl(f, L, reality, np)[:, m_start_ind:]
+    elif sampling.lower() == "healpix":
         ftm = hp.healpix_fft(f, L, nside, "numpy", reality)[:, m_offset:]
         if reality:
             ftm = ftm[:, m_start_ind:]
@@ -398,7 +442,8 @@ def forward_transform_jax(
     implementation).
 
     Args:
-        f (jnp.ndarray): Signal on the sphere.
+        f (jnp.ndarray): Signal on the sphere. For GL sampling, the longitude count
+            is inferred from ``f.shape[-1]`` and must be at least :math:`2L-1`.
 
         kernel (jnp.ndarray): Wigner-d kernel.
 
@@ -419,6 +464,9 @@ def forward_transform_jax(
         jnp.ndarray: Pixel-space coefficients.
 
     """
+    if sampling.lower() == "gl":
+        longitude._validate_gl_shape(f, L)
+
     if sampling.lower() == "mw":
         f = resampling_jax.mw_to_mwss(f, L, spin)
 
@@ -429,7 +477,9 @@ def forward_transform_jax(
     m_offset = 1 if sampling in ["mwss", "healpix"] else 0
     m_start_ind = L - 1 if reality else 0
 
-    if sampling.lower() == "healpix":
+    if sampling.lower() == "gl" and f.shape[-1] != 2 * L - 1:
+        ftm = longitude._forward_gl(f, L, reality, jnp)[:, m_start_ind:]
+    elif sampling.lower() == "healpix":
         ftm = hp.healpix_fft(f, L, nside, "jax", reality)[:, m_offset:]
         if reality:
             ftm = ftm[:, m_start_ind:]

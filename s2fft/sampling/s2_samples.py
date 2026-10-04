@@ -1,3 +1,5 @@
+from numbers import Integral
+
 import numpy as np
 
 
@@ -82,7 +84,7 @@ def ntheta_extension(L: int, sampling: str = "mw") -> int:
         )
 
 
-def nphi_equiang(L: int, sampling: str = "mw") -> int:
+def nphi_equiang(L: int, sampling: str = "mw", nphi: int | None = None) -> int:
     r"""
     Number of :math:`\phi` samples for equiangular sampling scheme at specified
     resolution.
@@ -96,6 +98,9 @@ def nphi_equiang(L: int, sampling: str = "mw") -> int:
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
             {"mw", "mwss", "dh", "gl"}.  Defaults to "mw".
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+
     Raises:
         ValueError: HEALPix sampling scheme.
 
@@ -105,6 +110,15 @@ def nphi_equiang(L: int, sampling: str = "mw") -> int:
         int: Number of :math:`\phi` samples.
 
     """
+    if nphi is not None:
+        if sampling.lower() != "gl":
+            raise ValueError("nphi is only supported for GL sampling.")
+        if isinstance(nphi, bool) or not isinstance(nphi, Integral):
+            raise ValueError("nphi must be an integer >= 2L - 1.")
+        if nphi < 2 * L - 1:
+            raise ValueError("nphi must be >= 2L - 1 for GL sampling.")
+        return int(nphi)
+
     if sampling.lower() in ["mw", "gl"]:
         return 2 * L - 1
 
@@ -126,6 +140,9 @@ def nphi_equiang(L: int, sampling: str = "mw") -> int:
 def ftm_shape(L: int, sampling: str = "mw", nside: int = None) -> tuple[int, int]:
     r"""
     Shape of intermediate array, before/after latitudinal step.
+
+    The GL order domain has fixed width :math:`2L-1`, independent of the physical
+    longitude count.
 
     Args:
         L (int): Harmonic band-limit.
@@ -353,7 +370,7 @@ def p2phi_ring(t: int, p: int, nside: int) -> np.ndarray:
     return factor * (p + shift)
 
 
-def phis_equiang(L: int, sampling: str = "mw") -> np.ndarray:
+def phis_equiang(L: int, sampling: str = "mw", nphi: int | None = None) -> np.ndarray:
     r"""
     Compute :math:`\phi` samples for equiangular sampling scheme.
 
@@ -363,16 +380,21 @@ def phis_equiang(L: int, sampling: str = "mw") -> np.ndarray:
         sampling (str, optional): Sampling scheme.  Supported equiangular sampling
             schemes include {"mw", "mwss", "dh", "gl"}.  Defaults to "mw".
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+
     Returns:
         np.ndarray: Array of :math:`\phi` samples for given sampling scheme.
 
     """
-    p = np.arange(0, nphi_equiang(L, sampling))
+    p = np.arange(0, nphi_equiang(L, sampling, nphi))
 
-    return p2phi_equiang(L, p, sampling)
+    return p2phi_equiang(L, p, sampling, nphi)
 
 
-def p2phi_equiang(L: int, p: int, sampling: str = "mw") -> np.ndarray:
+def p2phi_equiang(
+    L: int, p: int, sampling: str = "mw", nphi: int | None = None
+) -> np.ndarray:
     r"""
     Convert index to :math:`\phi` angle for sampling scheme.
 
@@ -384,6 +406,9 @@ def p2phi_equiang(L: int, p: int, sampling: str = "mw") -> np.ndarray:
         sampling (str, optional): Sampling scheme.  Supported equiangular sampling
             schemes include {"mw", "mwss", "dh", "gl"}.  Defaults to "mw".
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+
     Raises:
         ValueError: HEALPix sampling not support (only equiangular schemes supported).
 
@@ -393,20 +418,7 @@ def p2phi_equiang(L: int, p: int, sampling: str = "mw") -> np.ndarray:
         np.ndarray: :math:`\phi` sample(s) for given sampling scheme.
 
     """
-    if sampling.lower() in ["mw", "gl"]:
-        return 2 * p * np.pi / (2 * L - 1)
-
-    elif sampling.lower() == "mwss":
-        return 2 * p * np.pi / (2 * L)
-
-    elif sampling.lower() == "dh":
-        return 2 * p * np.pi / (2 * L - 1)
-
-    elif sampling.lower() == "healpix":
-        raise ValueError(f"Sampling scheme sampling={sampling} not supported")
-
-    else:
-        raise ValueError(f"Sampling scheme sampling={sampling} not supported")
+    return 2 * p * np.pi / nphi_equiang(L, sampling, nphi)
 
 
 def ring_phase_shift_hp(
@@ -443,7 +455,9 @@ def ring_phase_shift_hp(
     return np.exp(sign * 1j * np.arange(m_start_ind, L) * phi_offset)
 
 
-def f_shape(L: int = None, sampling: str = "mw", nside: int = None) -> tuple[int]:
+def f_shape(
+    L: int = None, sampling: str = "mw", nside: int = None, nphi: int | None = None
+) -> tuple[int]:
     r"""
     Shape of spherical signal.
 
@@ -456,11 +470,17 @@ def f_shape(L: int = None, sampling: str = "mw", nside: int = None) -> tuple[int
         nside (int, optional): HEALPix Nside resolution parameter.  Only required
             if sampling="healpix".  Defaults to None.
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+
     Returns:
         Tuple[int]: Pixel-space array dimensions with shape :math:`[n_{\theta}, n_{\phi}]`.
         Note that "healpix" is instead indexed by a 1D array, with standard conventions.
 
     """
+    if nphi is not None:
+        nphi_equiang(L, sampling, nphi)
+
     if sampling.lower() != "healpix" and L is None:
         raise ValueError(
             f"Sampling scheme sampling={sampling} with L={L} not supported"
@@ -475,7 +495,7 @@ def f_shape(L: int = None, sampling: str = "mw", nside: int = None) -> tuple[int
         return (12 * nside**2,)
 
     else:
-        return ntheta(L, sampling), nphi_equiang(L, sampling)
+        return ntheta(L, sampling), nphi_equiang(L, sampling, nphi)
 
 
 def flm_shape(L: int) -> tuple[int, int]:
