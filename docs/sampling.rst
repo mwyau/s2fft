@@ -208,9 +208,8 @@ select the physical grid; analysis infers it from ``f.shape[-1]``. For example:
 .. code-block:: python
 
   nphi = 2 * L
-  gl_phis = phis_equiang(L, sampling="gl", nphi=nphi)
-  gl_signal_samples = inverse(flm_gl, L, sampling="gl", nphi=nphi)
-  flm_gl = forward(gl_signal_samples, L, sampling="gl")
+  f = inverse(flm, L, sampling="gl", nphi=nphi)
+  flm = forward(f, L, sampling="gl")
 
 NumPy, JAX, and Torch spherical transforms support these grids, including
 precomputed transforms; latitude precomputes and kernels can be reused across
