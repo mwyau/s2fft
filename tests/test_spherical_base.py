@@ -173,3 +173,17 @@ def test_L_lower_exception(flm_generator, L: int):
 
     with pytest.raises(AssertionError):
         spherical.inverse(flm, L, spin, sampling, L_lower=L)
+
+
+@pytest.mark.parametrize("L", [6, 7])
+@pytest.mark.parametrize(
+    "spin_reality",
+    [(0, False), (0, True), (-1, False), (1, False), (-2, False), (2, False)],
+)
+@pytest.mark.parametrize("method", method_to_test)
+def test_cc_low_ring_roundtrip(flm_generator, L, spin_reality, method):
+    spin, reality = spin_reality
+    flm = flm_generator(L=L, spin=spin, reality=reality)
+    f = spherical._inverse(flm, L, spin, "cc", method, reality=reality)
+    recovered = spherical._forward(f, L, spin, "cc", method, reality=reality)
+    np.testing.assert_allclose(recovered, flm, atol=2e-13, rtol=2e-13)

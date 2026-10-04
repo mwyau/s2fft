@@ -380,18 +380,28 @@ def inverse_latitudinal_step_jax(
 
                 # TODO: Generalise this to optional device counts.
                 ndevices = local_device_count()
-                opsdevice = int(ntheta / ndevices)
+                # CC has L+1 rings, which cannot divide the device count when
+                # L does. Pad only the SPMD work arrays with repeated valid
+                # recursion states, then discard those lanes after pmap.
+                padding = (-ntheta) % ndevices if sampling.lower() == "cc" else 0
+                ntheta_padded = ntheta + padding
+                opsdevice = int(ntheta_padded / ndevices)
+
+                def pad_theta(array, axis=0):
+                    widths = [(0, 0)] * array.ndim
+                    widths[axis] = (0, padding)
+                    return jnp.pad(array, widths, mode="edge")
 
                 ftm = pmap(eval_recursion_step, in_axes=(0, 0, 1, 1, 0, 0, 0, 0))(
-                    ftm.reshape(ndevices, opsdevice, ftm.shape[-1]),
-                    dl_entry.reshape(ndevices, opsdevice, L),
-                    dl_iter.reshape(2, ndevices, opsdevice, L - L_lower),
-                    lrenorm.reshape(2, ndevices, opsdevice, L - L_lower),
-                    indices.reshape(ndevices, opsdevice, L - L_lower),
-                    omc.reshape(ndevices, opsdevice),
-                    c.reshape(ndevices, opsdevice),
-                    s.reshape(ndevices, opsdevice),
-                ).reshape(ntheta, ftm.shape[-1])
+                    pad_theta(ftm).reshape(ndevices, opsdevice, ftm.shape[-1]),
+                    pad_theta(dl_entry).reshape(ndevices, opsdevice, L),
+                    pad_theta(dl_iter, 1).reshape(2, ndevices, opsdevice, L - L_lower),
+                    pad_theta(lrenorm, 1).reshape(2, ndevices, opsdevice, L - L_lower),
+                    pad_theta(indices).reshape(ndevices, opsdevice, L - L_lower),
+                    pad_theta(omc).reshape(ndevices, opsdevice),
+                    pad_theta(c).reshape(ndevices, opsdevice),
+                    pad_theta(s).reshape(ndevices, opsdevice),
+                ).reshape(ntheta_padded, ftm.shape[-1])[:ntheta]
 
             else:
                 (
@@ -757,10 +767,18 @@ def forward_latitudinal_step_jax(
                 ) = args
 
                 index = indices >= L - m - 1
+                # Under CC SPMD, degree constants must follow the same
+                # column partition as the existing recursion work arrays.
+                if spmd and sampling.lower() == "cc":
+                    el_slice = indices[0]
+                    half_slice = el_slice + (-1) ** i * mm + 1
+                else:
+                    el_slice = el
+                    half_slice = half_slices[i]
                 lamb = (
-                    jnp.einsum("l,t->tl", el + 1, omc, optimize=True)
-                    + jnp.einsum("l,t->tl", m - L + el + 1, c, optimize=True)
-                    - half_slices[i]
+                    jnp.einsum("l,t->tl", el_slice + 1, omc, optimize=True)
+                    + jnp.einsum("l,t->tl", m - L + el_slice + 1, c, optimize=True)
+                    - half_slice
                 )
                 lamb = jnp.einsum("tl,t->tl", lamb, 1 / s, optimize=True)
 

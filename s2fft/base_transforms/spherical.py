@@ -262,7 +262,18 @@ def _forward(
 
     # Don't need to include spin in weights (even for spin signals)
     # since accounted for already in periodic extension and upsampling.
-    weights = quadrature.quad_weights_transform(L, sampling, 0, nside)
+    weights = (
+        np.ones(len(thetas))
+        if sampling.lower() == "cc"
+        else quadrature.quad_weights_transform(L, sampling, 0, nside)
+    )
+
+    if sampling.lower() == "cc":
+        if method == "direct":
+            # The direct spatial sum uses the same folded Fourier operator.
+            ftm = np.fft.fftshift(np.fft.fft(f, axis=-1), axes=-1)
+            ftm = resampling.folded_cc_quadrature(ftm, L, spin, m_start=-L)
+            f = np.fft.ifft(np.fft.ifftshift(ftm, axes=-1), axis=-1)
 
     transform_methods = {
         "direct": _compute_forward_direct,
@@ -763,6 +774,9 @@ def _compute_forward_sov(
             for m in range(m_start_ind, L):
                 ftm[t, m + L - 1] += np.exp(-1j * m * phi) * f[entry]
 
+    if sampling.lower() == "cc":
+        ftm = resampling.folded_cc_quadrature(ftm, L, spin, m_start=1 - L)
+
     flm = np.zeros(samples.flm_shape(L), dtype=np.complex128)
 
     for t, theta in enumerate(thetas):
@@ -860,6 +874,9 @@ def _compute_forward_sov_fft(
             ftm[:, L - 1 + m_offset :] = ftm_temp
         else:
             ftm = np.fft.fftshift(np.fft.fft(f, axis=1, norm="backward"), axes=1)
+
+    if sampling.lower() == "cc":
+        ftm = resampling.folded_cc_quadrature(ftm, L, spin, m_start=-L)
 
     for t, theta in enumerate(thetas):
         phi_ring_offset = (
@@ -978,6 +995,9 @@ def _compute_forward_sov_fft_vectorized(
             ftm[:, L - 1 + m_offset :] = t
         else:
             ftm = np.fft.fftshift(np.fft.fft(f, axis=1, norm="backward"), axes=1)
+
+    if sampling.lower() == "cc":
+        ftm = resampling.folded_cc_quadrature(ftm, L, spin, m_start=-L)
 
     for t, theta in enumerate(thetas):
         phase_shift = (

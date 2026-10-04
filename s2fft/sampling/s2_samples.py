@@ -45,7 +45,7 @@ def ntheta(L: int = None, sampling: str = "mw", nside: int = None) -> int:
         return L + 1
 
     elif sampling.lower() == "cc":
-        return 2 * L - 1
+        return L + 1
 
     elif sampling.lower() == "dh":
         return 2 * L

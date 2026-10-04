@@ -15,7 +15,8 @@ jax.config.update("jax_enable_x64", True)
 L_to_test = [6, 7]
 N_to_test = [2]
 L_lower_to_test = [0, 2]
-sampling_to_test = ["mw", "mwss", "dh", "gl"]
+sampling_to_test_ssht = ["mw", "mwss", "dh", "gl"]
+sampling_to_test = sampling_to_test_ssht + ["cc"]
 method_to_test = ["numpy", "jax", "torch"]
 reality_to_test = [False, True]
 
@@ -83,7 +84,7 @@ def test_forward_wigner_transform(
 @pytest.mark.parametrize("L", L_to_test)
 @pytest.mark.parametrize("N", N_to_test)
 @pytest.mark.parametrize("L_lower", L_lower_to_test)
-@pytest.mark.parametrize("sampling", sampling_to_test)
+@pytest.mark.parametrize("sampling", sampling_to_test_ssht)
 @pytest.mark.parametrize("reality", reality_to_test)
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
 def test_ssht_c_backend_inverse_wigner_transform(
@@ -101,7 +102,7 @@ def test_ssht_c_backend_inverse_wigner_transform(
 @pytest.mark.parametrize("L", L_to_test)
 @pytest.mark.parametrize("N", N_to_test)
 @pytest.mark.parametrize("L_lower", L_lower_to_test)
-@pytest.mark.parametrize("sampling", sampling_to_test)
+@pytest.mark.parametrize("sampling", sampling_to_test_ssht)
 @pytest.mark.parametrize("reality", reality_to_test)
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
 def test_ssht_c_backend_forward_wigner_transform(

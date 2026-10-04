@@ -49,7 +49,7 @@ def inverse(
             if sampling="healpix".  Defaults to None.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}.  Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}.  Defaults to "mw".
 
         method (str, optional): Execution mode in {"numpy", "jax", "jax_ssht"}.
             Defaults to "numpy".
@@ -143,7 +143,7 @@ def inverse_numpy(
             if sampling="healpix".  Defaults to None.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}.  Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}.  Defaults to "mw".
 
         reality (bool, optional): Whether the signal on the sphere is real.  If so,
             conjugate symmetry is exploited to reduce computational costs.  Defaults to
@@ -233,7 +233,7 @@ def inverse_jax(
             if sampling="healpix".  Defaults to None.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}.  Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}.  Defaults to "mw".
 
         reality (bool, optional): Whether the signal on the sphere is real.  If so,
             conjugate symmetry is exploited to reduce computational costs.  Defaults to
@@ -383,7 +383,7 @@ def forward(
             if sampling="healpix".  Defaults to None.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}.  Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}.  Defaults to "mw".
 
         method (str, optional): Execution mode in {"numpy", "jax", "jax_ssht"}.
             Defaults to "numpy".
@@ -476,7 +476,7 @@ def forward_numpy(
             if sampling="healpix".  Defaults to None.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}.  Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}.  Defaults to "mw".
 
         reality (bool, optional): Whether the signal on the sphere is real.  If so,
             conjugate symmetry is exploited to reduce computational costs.  Defaults to
@@ -571,7 +571,7 @@ def forward_jax(
             if sampling="healpix".  Defaults to None.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}.  Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}.  Defaults to "mw".
 
         reality (bool, optional): Whether the signal on the sphere is real.  If so,
             conjugate symmetry is exploited to reduce computational costs.  Defaults to

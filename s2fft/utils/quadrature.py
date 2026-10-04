@@ -387,6 +387,9 @@ def quad_weights_cc(L: int, xp: ModuleType = np) -> np.ndarray:
     r"""
     Compute Clenshaw-Curtis quadrature weights for :math:`\theta` and :math:`\phi` integration.
 
+    This is the diagonal rule on the ``L+1`` rings. Exact harmonic analysis
+    instead uses :func:`s2fft.utils.resampling.folded_cc_quadrature`.
+
     Args:
         L (int): Harmonic band-limit.
         xp (module): Array namespace to use for operations. Defaults to NumPy.
@@ -402,6 +405,10 @@ def quad_weights_cc(L: int, xp: ModuleType = np) -> np.ndarray:
 def quad_weights_cc_theta_only(L: int, xp: ModuleType = np) -> np.ndarray:
     r"""
     Compute Clenshaw-Curtis quadrature weights for :math:`\theta` integration (only).
+
+    The rule has ``L+1`` nodes, including both poles, and sums to two.
+    Passing ``2*L`` gives the dense theta rule used in folded analysis;
+    longitude normalisation must still use the original map's bandlimit.
 
     Args:
         L (int): Harmonic band-limit.

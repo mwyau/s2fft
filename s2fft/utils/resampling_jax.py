@@ -4,7 +4,38 @@ import jax.numpy as jnp
 from jax import jit as _jit
 
 from s2fft.sampling import s2_samples as samples
+from s2fft.utils import resampling
 from s2fft.utils._dtype_association import compatible_complex_dtype
+
+
+@_partial(_jit, static_argnames=("m_start",))
+def periodic_extension_cc(
+    ftm: jnp.ndarray, spin: int = 0, m_start: int = 0
+) -> jnp.ndarray:
+    """JAX implementation of :func:`resampling.periodic_extension_cc`."""
+    return resampling.periodic_extension_cc(ftm, spin, m_start, xp=jnp)
+
+
+@_partial(_jit, static_argnames=("m_start",))
+def periodic_extension_cc_adjoint(
+    ftm: jnp.ndarray, spin: int = 0, m_start: int = 0
+) -> jnp.ndarray:
+    """JAX implementation of :func:`resampling.periodic_extension_cc_adjoint`."""
+    return resampling.periodic_extension_cc_adjoint(ftm, spin, m_start, xp=jnp)
+
+
+@_partial(_jit, static_argnames=("adjoint",))
+def half_grid_shift_cc(ftm: jnp.ndarray, adjoint: bool = False) -> jnp.ndarray:
+    """JAX implementation of :func:`resampling.half_grid_shift_cc`."""
+    return resampling.half_grid_shift_cc(ftm, adjoint, xp=jnp)
+
+
+@_partial(_jit, static_argnames=("L", "m_start"))
+def folded_cc_quadrature(
+    ftm: jnp.ndarray, L: int, spin: int = 0, m_start: int = 0
+) -> jnp.ndarray:
+    """JAX implementation of :func:`resampling.folded_cc_quadrature`."""
+    return resampling.folded_cc_quadrature(ftm, L, spin, m_start, xp=jnp)
 
 
 @_partial(_jit, static_argnums=(1))

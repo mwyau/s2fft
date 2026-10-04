@@ -378,3 +378,49 @@ def test_n_sample_wigner_fourier_inverse_fft_raises():
     n_theta = 1
     with pytest.raises(ValueError, match=f"{sampling} not recognised"):
         c._n_sample_wigner_fourier_inverse_fft(sampling, n_theta)
+
+
+@pytest.mark.parametrize("L", [6, 7])
+@pytest.mark.parametrize(
+    "spin_reality",
+    [(0, False), (0, True), (-1, False), (1, False), (-2, False), (2, False)],
+)
+@pytest.mark.parametrize("method", methods_to_test)
+@pytest.mark.parametrize("recursion", ["price-mcewen", "risbo"])
+def test_cc_low_ring_roundtrip(flm_generator, L, spin_reality, method, recursion):
+    spin, reality = spin_reality
+    flm = flm_generator(L=L, spin=spin, reality=reality)
+    kfunc = {
+        "numpy": c.spin_spherical_kernel,
+        "jax": c.spin_spherical_kernel_jax,
+        "torch": c.spin_spherical_kernel_torch,
+    }[method]
+    ki = kfunc(L, spin, reality, "cc", forward=False, recursion=recursion)
+    kf = kfunc(L, spin, reality, "cc", forward=True, recursion=recursion)
+    assert kf.shape[0] == L + 1
+    coeffs = torch.from_numpy(flm) if method == "torch" else flm
+    f = inverse(coeffs, L, spin, ki, "cc", reality, method)
+    recovered = forward(f, L, spin, kf, "cc", reality, method)
+    if method == "torch":
+        recovered = recovered.resolve_conj().numpy()
+    np.testing.assert_allclose(recovered, flm, atol=2e-13, rtol=2e-13)
+
+
+@pytest.mark.parametrize(
+    "spin_reality", [(0, False), (0, True), (-2, False), (2, False)]
+)
+@pytest.mark.parametrize("method", ["numpy", "jax"])
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_cc_folded_kernel_matches_analysis(rng, spin_reality, method):
+    from s2fft.transforms import spherical
+
+    L = 6
+    spin, reality = spin_reality
+    f = rng.normal(size=(L + 1, 2 * L))
+    if not reality:
+        f = f + 1j * rng.normal(size=f.shape)
+    expected = spherical.forward(
+        f, L, spin, sampling="cc", reality=reality, method="numpy"
+    )
+    actual = forward(f, L, spin, sampling="cc", reality=reality, method=method)
+    np.testing.assert_allclose(actual, expected, atol=2e-13, rtol=2e-13)

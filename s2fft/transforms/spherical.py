@@ -169,9 +169,13 @@ def inverse_numpy(
     )
 
     # Perform latitudinal wigner-d recursions
-    ftm = otf.inverse_latitudinal_step(
-        flm, thetas, L, spin, nside, sampling, reality, precomps, L0
-    )
+    if sampling.lower() == "cc" and L == 1:
+        # This grid contains only the two explicitly evaluated poles below.
+        ftm = np.zeros(samples.ftm_shape(L, sampling), dtype=np.complex128)
+    else:
+        ftm = otf.inverse_latitudinal_step(
+            flm, thetas, L, spin, nside, sampling, reality, precomps, L0
+        )
 
     # Remove south pole singularity
     if sampling.lower() in samples.INCLUDES_SOUTH_POLE_SCHEMES:
@@ -500,7 +504,6 @@ def forward_numpy(
         thetas = samples.thetas(L, sampling, nside)
 
     # Define latitudinal sample positions and Fourier offsets
-    weights = quadrature.quad_weights_transform(L, sampling, 0, nside)
     m_offset = samples.m_offset(L, sampling)
     m_start_ind = L - 1 if reality else 0
     L0 = L_lower
@@ -519,7 +522,11 @@ def forward_numpy(
             ftm = np.fft.fftshift(np.fft.fft(f, axis=1, norm="backward"), axes=1)
 
     # Apply quadrature weights
-    ftm = np.einsum("tm,t->tm", ftm, weights)
+    if sampling.lower() == "cc":
+        ftm = resampling.folded_cc_quadrature(ftm, L, spin, m_start=-L)
+    else:
+        weights = quadrature.quad_weights_transform(L, sampling, 0, nside)
+        ftm = np.einsum("tm,t->tm", ftm, weights)
 
     # Correct healpix theta row offsets
     if sampling.lower() == "healpix":
@@ -531,7 +538,10 @@ def forward_numpy(
     )
 
     # Perform latitudinal wigner-d recursions
-    if sampling.lower() in INCLUDES_BOTH_POLES_SCHEMES:
+    if sampling.lower() == "cc" and L == 1:
+        # There are no interior rings on which to initialise the recursion.
+        flm = np.zeros(samples.flm_shape(L), dtype=np.complex128)
+    elif sampling.lower() in INCLUDES_BOTH_POLES_SCHEMES:
         flm = otf.forward_latitudinal_step(
             ftm[1:-1],
             thetas[1:-1],
@@ -648,7 +658,6 @@ def forward_jax(
         thetas = samples.thetas(L, sampling, nside)
 
     # Define latitudinal sample positions and Fourier offsets
-    weights = quadrature_jax.quad_weights_transform(L, sampling, nside)
     m_offset = samples.m_offset(L, sampling)
     m_start_ind = L - 1 if reality else 0
 
@@ -669,7 +678,11 @@ def forward_jax(
             ftm = jnp.fft.fftshift(jnp.fft.fft(f, axis=1, norm="backward"), axes=1)
 
     # Apply quadrature weights
-    ftm = jnp.einsum("tm,t->tm", ftm, weights, optimize=True)
+    if sampling.lower() == "cc":
+        ftm = resampling_jax.folded_cc_quadrature(ftm, L, spin, m_start=-L)
+    else:
+        weights = quadrature_jax.quad_weights_transform(L, sampling, nside)
+        ftm = jnp.einsum("tm,t->tm", ftm, weights, optimize=True)
 
     # Correct healpix theta row offsets
     if sampling.lower() == "healpix":

@@ -346,3 +346,45 @@ def test_healpix_c_backend_forward_custom_gradients(
         )
 
     check_grads(func, (f,), order=2, modes=("fwd", "rev"))
+
+
+@pytest.mark.parametrize(
+    "spin_reality", [(0, False), (0, True), (-2, False), (1, False)]
+)
+@pytest.mark.parametrize("spmd", [False, True])
+def test_cc_batched_forward_gradients(flm_generator, spin_reality, spmd):
+    import numpy as np
+
+    L = 6
+    if spmd:
+        L += (-L) % jax.local_device_count()
+    spin, reality = spin_reality
+    flms = jnp.stack([flm_generator(L=L, spin=spin, reality=reality) for _ in range(2)])
+
+    def synthesize(flm):
+        return spherical.inverse_jax(
+            flm, L, spin, sampling="cc", reality=reality, spmd=spmd
+        )
+
+    def analyze(f):
+        return spherical.forward_jax(
+            f, L, spin, sampling="cc", reality=reality, spmd=spmd
+        )
+
+    # The transforms already have a JIT boundary. Avoid a further outer JIT
+    # around pmap, consistent with JAX's jit-of-pmap recommendation.
+    compile_batch = (lambda fn: fn) if spmd else jax.jit
+    maps = compile_batch(jax.vmap(synthesize))(flms)
+    recovered = compile_batch(jax.vmap(analyze))(maps)
+    np.testing.assert_allclose(recovered, flms, atol=2e-13, rtol=2e-13)
+
+    def loss(f):
+        return jnp.sum(jnp.abs(analyze(f)) ** 2)
+
+    batched_grad = compile_batch(jax.vmap(jax.grad(loss)))(maps)
+    composed_grad = compile_batch(jax.grad(lambda fs: jnp.sum(jax.vmap(loss)(fs))))(
+        maps
+    )
+    loop_grad = jnp.stack([jax.grad(loss)(f) for f in maps])
+    np.testing.assert_allclose(batched_grad, loop_grad, atol=2e-13, rtol=2e-13)
+    np.testing.assert_allclose(composed_grad, loop_grad, atol=2e-13, rtol=2e-13)

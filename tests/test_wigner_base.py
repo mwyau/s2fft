@@ -10,7 +10,7 @@ L_to_test = [6, 7]
 N_to_test = [2, 3]
 L_lower_to_test = [0, 2]
 sampling_schemes_so3 = ["mw", "mwss"]
-sampling_schemes = ["mw", "mwss", "dh", "gl"]
+sampling_schemes = ["mw", "mwss", "dh", "gl", "cc"]
 reality_to_test = [False, True]
 
 

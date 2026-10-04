@@ -6,7 +6,13 @@ import numpy as np
 
 from s2fft import recursions
 from s2fft.sampling import s2_samples as samples
-from s2fft.utils import quadrature, quadrature_jax, torch_wrapper
+from s2fft.utils import (
+    quadrature,
+    quadrature_jax,
+    resampling,
+    resampling_jax,
+    torch_wrapper,
+)
 
 # Maximum spin number at which Price-McEwen recursion is sufficiently accurate.
 # For spins > PM_MAX_STABLE_SPIN one should default to the Risbo recursion.
@@ -167,8 +173,24 @@ def spin_spherical_kernel(
 
     # Fold in quadrature to avoid recomputation at run-time.
     if forward:
-        weights = quadrature.quad_weights_transform(L, sampling, 0, nside)
-        dl = np.einsum("...tlm, ...t->...tlm", dl, weights)
+        if sampling.lower() == "cc":
+            # P U = (U P*)*: U is Hermitian, while contraction does not
+            # conjugate the kernel. Keep the permanent theta dimension L+1.
+            dl = np.swapaxes(
+                np.conj(
+                    resampling.folded_cc_quadrature(
+                        np.conj(np.swapaxes(dl, -3, -2)),
+                        L,
+                        spin,
+                        m_start=m_start_ind + 1 - L,
+                    )
+                ),
+                -3,
+                -2,
+            ).real  # U preserves real kernels; discard FFT roundoff only.
+        else:
+            weights = quadrature.quad_weights_transform(L, sampling, 0, nside)
+            dl = np.einsum("...tlm, ...t->...tlm", dl, weights)
 
     # Apply the per ring phase shift for healpix sampling.
     if sampling.lower() == "healpix":
@@ -324,8 +346,24 @@ def spin_spherical_kernel_jax(
 
     # Fold in quadrature to avoid recomputation at run-time.
     if forward:
-        weights = quadrature_jax.quad_weights_transform(L, sampling, nside)
-        dl = jnp.einsum("...tlm, ...t->...tlm", dl, weights)
+        if sampling.lower() == "cc":
+            # P U = (U P*)*: U is Hermitian, while contraction does not
+            # conjugate the kernel. Keep the permanent theta dimension L+1.
+            dl = jnp.swapaxes(
+                jnp.conj(
+                    resampling_jax.folded_cc_quadrature(
+                        jnp.conj(jnp.swapaxes(dl, -3, -2)),
+                        L,
+                        spin,
+                        m_start=m_start_ind + 1 - L,
+                    )
+                ),
+                -3,
+                -2,
+            ).real  # U preserves real kernels; discard FFT roundoff only.
+        else:
+            weights = quadrature_jax.quad_weights_transform(L, sampling, nside)
+            dl = jnp.einsum("...tlm, ...t->...tlm", dl, weights)
 
     # Apply the per ring phase shift for healpix sampling.
     if sampling.lower() == "healpix":
@@ -393,7 +431,9 @@ def wigner_kernel(
     # - Can only use the FFT approach when uniformly sampling in theta.
     # - FFT approach is only more efficient when N <= L/Log(L) roughly.
     if mode.lower() == "auto":
-        if sampling.lower() in samples.EQUIANGULAR_SCHEMES:
+        if sampling.lower() == "cc" and L == 1:
+            mode = "direct"
+        elif sampling.lower() in samples.EQUIANGULAR_SCHEMES:
             mode = "fft" if N <= int(L / np.log(L)) else "direct"
         else:
             mode = "direct"
@@ -453,8 +493,24 @@ def wigner_kernel(
 
     # Fold in quadrature to avoid recomputation at run-time (forward).
     if forward:
-        weights = quadrature.quad_weights_transform(L, sampling, 0, nside)
-        dl = np.einsum("...ntlm, ...t->...ntlm", dl, weights)
+        if sampling.lower() == "cc":
+            # P U = (U P*)*: U is Hermitian, while contraction does not
+            # conjugate the kernel. Keep the permanent theta dimension L+1.
+            dl = np.swapaxes(
+                np.conj(
+                    resampling.folded_cc_quadrature(
+                        np.conj(np.swapaxes(dl, -3, -2)),
+                        L,
+                        -n[:, None],
+                        m_start=1 - L,
+                    )
+                ),
+                -3,
+                -2,
+            ).real  # U preserves real kernels; discard FFT roundoff only.
+        else:
+            weights = quadrature.quad_weights_transform(L, sampling, 0, nside)
+            dl = np.einsum("...ntlm, ...t->...ntlm", dl, weights)
         dl *= 2 * np.pi / (2 * N - 1)
 
     # Fold in normalisation to avoid recomputation at run-time (inverse).
@@ -526,7 +582,9 @@ def wigner_kernel_jax(
     # - Can only use the FFT approach when uniformly sampling in theta.
     # - FFT approach is only more efficient when N <= L/Log(L) roughly.
     if mode.lower() == "auto":
-        if sampling.lower() in samples.EQUIANGULAR_SCHEMES:
+        if sampling.lower() == "cc" and L == 1:
+            mode = "direct"
+        elif sampling.lower() in samples.EQUIANGULAR_SCHEMES:
             mode = "fft" if N <= int(L / np.log(L)) else "direct"
         else:
             mode = "direct"
@@ -587,8 +645,24 @@ def wigner_kernel_jax(
 
     # Fold in quadrature to avoid recomputation at run-time (forward).
     if forward:
-        weights = quadrature_jax.quad_weights_transform(L, sampling, nside)
-        dl = jnp.einsum("...ntlm, ...t->...ntlm", dl, weights)
+        if sampling.lower() == "cc":
+            # P U = (U P*)*: U is Hermitian, while contraction does not
+            # conjugate the kernel. Keep the permanent theta dimension L+1.
+            dl = jnp.swapaxes(
+                jnp.conj(
+                    resampling_jax.folded_cc_quadrature(
+                        jnp.conj(jnp.swapaxes(dl, -3, -2)),
+                        L,
+                        -n[:, None],
+                        m_start=1 - L,
+                    )
+                ),
+                -3,
+                -2,
+            ).real  # U preserves real kernels; discard FFT roundoff only.
+        else:
+            weights = quadrature_jax.quad_weights_transform(L, sampling, nside)
+            dl = jnp.einsum("...ntlm, ...t->...ntlm", dl, weights)
         dl *= 2 * jnp.pi / (2 * N - 1)
 
     # Fold in normalisation to avoid recomputation at run-time (inverse).

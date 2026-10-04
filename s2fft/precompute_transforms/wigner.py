@@ -35,7 +35,7 @@ def inverse(
         kernel (np.ndarray, optional): Wigner-d kernel. Defaults to None.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}. Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}. Defaults to "mw".
 
         reality (bool, optional): Whether the signal on the sphere is real.  If so,
             conjugate symmetry is exploited to reduce computational costs.
@@ -101,7 +101,7 @@ def inverse_transform(
         N (int): Directional band-limit.
 
         sampling (str): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}.
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}.
 
         reality (bool, optional): Whether the signal on the sphere is real.  If so,
             conjugate symmetry is exploited to reduce computational costs.
@@ -163,7 +163,7 @@ def inverse_transform_jax(
         N (int): Directional band-limit.
 
         sampling (str): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}.
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}.
 
         reality (bool, optional): Whether the signal on the sphere is real.  If so,
             conjugate symmetry is exploited to reduce computational costs.
@@ -248,7 +248,7 @@ def forward(
         kernel (np.ndarray, optional): Wigner-d kernel. Defaults to None.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}. Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}. Defaults to "mw".
 
         reality (bool, optional): Whether the signal on the sphere is real.  If so,
             conjugate symmetry is exploited to reduce computational costs.
@@ -312,7 +312,7 @@ def forward_transform(
         N (int): Directional band-limit.
 
         sampling (str): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}.
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}.
 
         reality (bool, optional): Whether the signal on the sphere is real.  If so,
             conjugate symmetry is exploited to reduce computational costs.
@@ -395,7 +395,7 @@ def forward_transform_jax(
         N (int): Directional band-limit.
 
         sampling (str): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl", "healpix"}.
+            {"mw", "mwss", "dh", "gl", "healpix", "cc"}.
 
         reality (bool, optional): Whether the signal on the sphere is real.  If so,
             conjugate symmetry is exploited to reduce computational costs.

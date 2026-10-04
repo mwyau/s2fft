@@ -11,7 +11,8 @@ jax.config.update("jax_enable_x64", True)
 L_to_test = [6]
 N_to_test = [3]
 L_lower_to_test = [1]
-sampling_to_test = ["mw", "mwss", "dh", "gl"]
+sampling_to_test_ssht = ["mw", "mwss", "dh", "gl"]
+sampling_to_test = sampling_to_test_ssht + ["cc"]
 reality_to_test = [False, True]
 
 
@@ -79,7 +80,7 @@ def test_forward_wigner_custom_gradients(
 @pytest.mark.parametrize("L", L_to_test)
 @pytest.mark.parametrize("N", N_to_test)
 @pytest.mark.parametrize("L_lower", L_lower_to_test)
-@pytest.mark.parametrize("sampling", sampling_to_test)
+@pytest.mark.parametrize("sampling", sampling_to_test_ssht)
 @pytest.mark.parametrize("reality", reality_to_test)
 @pytest.mark.parametrize("_ssht_backend", [0, 1])
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
@@ -122,7 +123,7 @@ def test_ssht_c_backend_inverse_wigner_custom_gradients(
 @pytest.mark.parametrize("L", L_to_test)
 @pytest.mark.parametrize("N", N_to_test)
 @pytest.mark.parametrize("L_lower", L_lower_to_test)
-@pytest.mark.parametrize("sampling", sampling_to_test)
+@pytest.mark.parametrize("sampling", sampling_to_test_ssht)
 @pytest.mark.parametrize("reality", reality_to_test)
 @pytest.mark.parametrize("_ssht_backend", [0, 1])
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")

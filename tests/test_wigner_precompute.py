@@ -343,3 +343,38 @@ def test_forward_wigner_transform_high_N(
     np.testing.assert_allclose(
         test_data["flmn_so3"], flmn_check, atol=1e-10, rtol=1e-10
     )
+
+
+@pytest.mark.parametrize("L", [6, 7])
+@pytest.mark.parametrize("N", [2, 3])
+@pytest.mark.parametrize("reality", reality_to_test)
+@pytest.mark.parametrize("method", methods_to_test)
+@pytest.mark.parametrize("mode", ["fft", "direct"])
+def test_cc_low_ring_roundtrip(flmn_generator, L, N, reality, method, mode):
+    flmn = flmn_generator(L=L, N=N, reality=reality)
+    kfunc = _kernel_functions[method]
+    ki = kfunc(L, N, reality, "cc", forward=False, mode=mode)
+    kf = kfunc(L, N, reality, "cc", forward=True, mode=mode)
+    assert kf.shape[1] == L + 1
+    coeffs = torch.from_numpy(flmn) if method == "torch" else flmn
+    f = inverse(coeffs, L, N, ki, "cc", reality, method)
+    recovered = forward(f, L, N, kf, "cc", reality, method)
+    if method == "torch":
+        recovered = recovered.resolve_conj().numpy()
+    np.testing.assert_allclose(recovered, flmn, atol=2e-13, rtol=2e-13)
+
+
+@pytest.mark.parametrize("reality", reality_to_test)
+@pytest.mark.parametrize("method", methods_to_test)
+def test_cc_monopole(reality, method):
+    flmn = np.array([[[0.7 if reality else 0.7 + 0.2j]]], dtype=np.complex128)
+    kfunc = _kernel_functions[method]
+    ki = kfunc(1, 1, reality, "cc", forward=False)
+    kf = kfunc(1, 1, reality, "cc", forward=True)
+    coeffs = torch.from_numpy(flmn) if method == "torch" else flmn
+    f = inverse(coeffs, 1, 1, ki, "cc", reality, method)
+    assert f.shape == (1, 2, 2)
+    recovered = forward(f, 1, 1, kf, "cc", reality, method)
+    if method == "torch":
+        recovered = recovered.resolve_conj().numpy()
+    np.testing.assert_allclose(recovered, flmn, atol=1e-15)

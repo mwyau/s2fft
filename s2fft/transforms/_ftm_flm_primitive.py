@@ -32,6 +32,8 @@ take the analytical-transpose path rather than autodiffing through the
 edge cases).
 """
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 from jax.core import ShapedArray
@@ -129,7 +131,17 @@ def _batch_primitive(primitive, batched_args, batch_axes, **params):
 
 
 def _flm_to_ftm_abstract(
-    flm, thetas, spin, *precomps, L, nside, sampling, reality, spmd, L_lower
+    flm,
+    thetas,
+    spin,
+    *precomps,
+    L,
+    nside,
+    sampling,
+    reality,
+    spmd,
+    L_lower,
+    call_jaxpr=None,
 ):
     # As inverse_latitudinal_step_jax determines shape of first dimension of ftm value
     # returned by size (of last dimension if batched) of thetas argument instead of
@@ -143,9 +155,13 @@ def _flm_to_ftm_abstract(
     return ShapedArray(out_shape, flm.dtype)
 
 
-def _flm_to_ftm_impl(flm, thetas, spin, *precomps, **params):
+def _flm_to_ftm_impl(flm, thetas, spin, *precomps, call_jaxpr=None, **params):
+    recursion = otf.inverse_latitudinal_step_jax
+    if params["spmd"] and params["sampling"].lower() == "cc":
+        recursion = recursion.__wrapped__
+
     def fn(d, s, p):
-        return otf.inverse_latitudinal_step_jax(
+        return recursion(
             flm=d, beta=thetas, spin=s, precomps=_untuplify_precomps(p), **params
         )
 
@@ -169,6 +185,7 @@ def _flm_to_ftm_transpose(cotangent, flm, thetas, spin, *precomps, **params):
     # The transpose of the flm_to_ftm primitive (applied to the initial flm argument) is
     # the ftm_to_flm primitive. We do not pass through the supplied (flm_to_ftm) precomps
     # so these are regenerated internally for the ftm_to_flm primitive.
+    params.pop("call_jaxpr", None)
     cot_flm = ftm_to_flm(cotangent, thetas, spin=spin, **params)
     return (cot_flm, None, None) + (None,) * len(precomps)
 
@@ -203,15 +220,29 @@ _flm_to_ftm_primitive = register_primitive(
 
 
 def _ftm_to_flm_abstract(
-    ftm, thetas, spin, *precomps, L, nside, sampling, reality, spmd, L_lower
+    ftm,
+    thetas,
+    spin,
+    *precomps,
+    L,
+    nside,
+    sampling,
+    reality,
+    spmd,
+    L_lower,
+    call_jaxpr=None,
 ):
     out_shape = ftm.shape[:-_DATA_NDIM] + samples.flm_shape(L)
     return ShapedArray(out_shape, ftm.dtype)
 
 
-def _ftm_to_flm_impl(ftm, thetas, spin, *precomps, **params):
+def _ftm_to_flm_impl(ftm, thetas, spin, *precomps, call_jaxpr=None, **params):
+    recursion = otf.forward_latitudinal_step_jax
+    if params["spmd"] and params["sampling"].lower() == "cc":
+        recursion = recursion.__wrapped__
+
     def fn(d, s, p):
-        return otf.forward_latitudinal_step_jax(
+        return recursion(
             ftm_in=d, beta_in=thetas, spin=s, precomps=_untuplify_precomps(p), **params
         )
 
@@ -235,6 +266,7 @@ def _ftm_to_flm_transpose(cotangent, ftm, thetas, spin, *precomps, **params):
     # The transpose of the ftm_to_flm primitive (applied to the initial ftm argument) is
     # the flm_to_ftm primitive. We do not pass through the supplied (ftm_to_flm) precomps
     # so these are regenerated internally for the flm_to_ftm primitive.
+    params.pop("call_jaxpr", None)
     cot_ftm = flm_to_ftm(cotangent, thetas, spin=spin, **params)
     return (cot_ftm, None, None) + (None,) * len(precomps)
 
@@ -284,6 +316,17 @@ def flm_to_ftm(
     trace time; this matches the behaviour of
     :func:`otf.inverse_latitudinal_step_jax`.
     """
+    params = dict(
+        L=L, nside=nside, sampling=sampling, reality=reality, spmd=spmd, L_lower=L_lower
+    )
+    # JAX cannot infer nested pmap replicas from an opaque custom primitive.
+    # Expose the actual CC SPMD program as call_jaxpr metadata; its presence
+    # preserves compilation across devices without changing primitive AD rules.
+    call_jaxpr = None
+    if spmd and sampling.lower() == "cc" and jax.local_device_count() > 1:
+        call_jaxpr = jax.make_jaxpr(partial(_flm_to_ftm_impl, **params))(
+            flm, thetas, _as_spin_operand(spin), *_tuplify_precomps(precomps)
+        ).jaxpr
     return _flm_to_ftm_primitive.bind(
         flm,
         thetas,
@@ -295,6 +338,7 @@ def flm_to_ftm(
         reality=reality,
         spmd=spmd,
         L_lower=L_lower,
+        call_jaxpr=call_jaxpr,
     )
 
 
@@ -318,6 +362,17 @@ def ftm_to_flm(
     trace time; this matches the behaviour of
     :func:`otf.forward_latitudinal_step_jax`.
     """
+    params = dict(
+        L=L, nside=nside, sampling=sampling, reality=reality, spmd=spmd, L_lower=L_lower
+    )
+    # JAX cannot infer nested pmap replicas from an opaque custom primitive.
+    # Expose the actual CC SPMD program as call_jaxpr metadata; its presence
+    # preserves compilation across devices without changing primitive AD rules.
+    call_jaxpr = None
+    if spmd and sampling.lower() == "cc" and jax.local_device_count() > 1:
+        call_jaxpr = jax.make_jaxpr(partial(_ftm_to_flm_impl, **params))(
+            ftm, thetas, _as_spin_operand(spin), *_tuplify_precomps(precomps)
+        ).jaxpr
     return _ftm_to_flm_primitive.bind(
         ftm,
         thetas,
@@ -329,4 +384,5 @@ def ftm_to_flm(
         reality=reality,
         spmd=spmd,
         L_lower=L_lower,
+        call_jaxpr=call_jaxpr,
     )

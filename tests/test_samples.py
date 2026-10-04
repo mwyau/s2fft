@@ -176,3 +176,14 @@ def test_samples_exceptions():
 
     with pytest.raises(ValueError):
         samples.t2theta(t=0, sampling="mw")
+
+
+@pytest.mark.parametrize("L", [1, 5, 6, 72])
+def test_cc_low_ring_geometry(L):
+    assert samples.ntheta(L, "cc") == L + 1
+    assert samples.nphi_equiang(L, "cc") == 2 * L
+    assert samples.f_shape(L, "cc") == (L + 1, 2 * L)
+    np.testing.assert_allclose(samples.thetas(L, "cc"), np.arange(L + 1) * np.pi / L)
+    assert samples.thetas(L, "cc")[0] == 0
+    assert samples.thetas(L, "cc")[-1] == np.pi
+    assert samples.ntheta(L, "f2") == 2 * L - 1

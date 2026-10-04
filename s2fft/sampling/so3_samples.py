@@ -24,7 +24,7 @@ def f_shape(
         N (int): Directional band-limit.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl"}.  Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "cc"}.  Defaults to "mw".
 
         nside (int, optional): HEALPix Nside resolution parameter.  Only required
             if sampling="healpix".  Defaults to None.
@@ -37,7 +37,7 @@ def f_shape(
         :math:`SO(3)`.
 
     """
-    if sampling in ["mw", "mwss", "dh", "gl"]:
+    if sampling in ["mw", "mwss", "dh", "gl", "cc"]:
         return _ngamma(N), _nbeta(L, sampling), _nalpha(L, sampling)
 
     elif sampling.lower() == "healpix":
@@ -78,7 +78,7 @@ def fnab_shape(
         N (int): Directional band-limit.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl"}.  Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "cc"}.  Defaults to "mw".
 
         nside (int, optional): HEALPix Nside resolution parameter.
 
@@ -117,7 +117,7 @@ def _nalpha(L: int, sampling: str = "mw") -> int:
         L (int): Harmonic band-limit.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl"}.  Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "cc"}.  Defaults to "mw".
 
     Raises:
         ValueError: Unknown sampling scheme.
@@ -129,7 +129,7 @@ def _nalpha(L: int, sampling: str = "mw") -> int:
     if sampling.lower() in ["mw", "dh", "gl"]:
         return 2 * L - 1
 
-    elif sampling.lower() == "mwss":
+    elif sampling.lower() in ("mwss", "cc"):
         return 2 * L
 
     else:
@@ -144,7 +144,7 @@ def _nbeta(L: int, sampling: str = "mw") -> int:
         L (int): Harmonic band-limit.
 
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
-            {"mw", "mwss", "dh", "gl"}.  Defaults to "mw".
+            {"mw", "mwss", "dh", "gl", "cc"}.  Defaults to "mw".
 
     Raises:
         ValueError: Unknown sampling scheme.
@@ -156,7 +156,7 @@ def _nbeta(L: int, sampling: str = "mw") -> int:
     if sampling.lower() in ["mw", "gl"]:
         return L
 
-    elif sampling.lower() == "mwss":
+    elif sampling.lower() in ("mwss", "cc"):
         return L + 1
 
     elif sampling.lower() == "dh":

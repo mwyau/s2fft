@@ -31,7 +31,7 @@ jax.config.update("jax_enable_x64", True)
 L_TEST = 8
 L_LOWER_TEST = 0
 SPIN_TEST = [-2, 0, 1]
-SAMPLING_TEST = ["mw", "mwss", "dh", "gl"]
+SAMPLING_TEST = ["mw", "mwss", "dh", "gl", "cc", "f2"]
 
 
 def _make_inputs(rng, L, spin, sampling, reality):
@@ -263,7 +263,7 @@ def test_grad_matches_direct_otf_call(rng):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("sampling", ["mw", "healpix"])
+@pytest.mark.parametrize("sampling", ["mw", "healpix", "cc"])
 def test_flm_to_ftm_vmap_matches_loop(sampling, rng):
     spin = 0
     nside = 4 if sampling == "healpix" else None
@@ -295,7 +295,7 @@ def test_flm_to_ftm_vmap_matches_loop(sampling, rng):
     np.testing.assert_allclose(np.asarray(vmapped), np.asarray(looped), atol=1e-12)
 
 
-@pytest.mark.parametrize("sampling", ["mw", "healpix"])
+@pytest.mark.parametrize("sampling", ["mw", "healpix", "cc"])
 def test_ftm_to_flm_vmap_matches_loop(sampling, rng):
     spin = 0
     nside = 4 if sampling == "healpix" else None

@@ -1,7 +1,82 @@
+from types import ModuleType
+
 import numpy as np
 
 from s2fft.sampling import s2_samples as samples
 from s2fft.utils._dtype_association import compatible_complex_dtype
+
+
+def periodic_extension_cc(
+    ftm: np.ndarray, spin: int = 0, m_start: int = 0, xp: ModuleType = np
+) -> np.ndarray:
+    r"""
+    Extend longitude Fourier coefficients to a periodic latitude sequence.
+
+    The last two axes are latitude and longitude mode. Modes are consecutive,
+    starting at ``m_start``: use ``-L`` for the full shifted CC FFT (including
+    its unused Nyquist column), ``1-L`` for a projection kernel, and ``0`` for
+    nonnegative modes. Leading axes are batch axes; spin may broadcast over them.
+    Reflection has parity :math:`(-1)^{m+s}`, as in MWSS resampling. The poles
+    occur only once in the extended sequence of length ``2*(ntheta-1)``.
+    """
+    m = xp.arange(m_start, m_start + ftm.shape[-1])
+    parity = 1 - 2 * ((m + xp.asarray(spin)[..., None, None]) % 2)
+    return xp.concatenate((ftm, xp.flip(ftm[..., 1:-1, :], axis=-2) * parity), axis=-2)
+
+
+def periodic_extension_cc_adjoint(
+    ftm: np.ndarray, spin: int = 0, m_start: int = 0, xp: ModuleType = np
+) -> np.ndarray:
+    """Apply the exact Euclidean adjoint of :func:`periodic_extension_cc`."""
+    L = ftm.shape[-2] // 2
+    m = xp.arange(m_start, m_start + ftm.shape[-1])
+    parity = 1 - 2 * ((m + xp.asarray(spin)[..., None, None]) % 2)
+    interior = ftm[..., 1:L, :] + parity * xp.flip(ftm[..., L + 1 :, :], axis=-2)
+    return xp.concatenate((ftm[..., :1, :], interior, ftm[..., L : L + 1, :]), axis=-2)
+
+
+def half_grid_shift_cc(
+    ftm: np.ndarray, adjoint: bool = False, xp: ModuleType = np
+) -> np.ndarray:
+    """
+    Shift a periodic latitude sequence by half a ring spacing using FFTs.
+
+    With ``adjoint=True``, use the conjugate phase, giving the exact adjoint
+    of the shift. Latitude is the penultimate axis. The even-length latitude
+    Nyquist mode represents a cosine, which vanishes on the half grid, so its
+    phase is zero. Supported harmonics have degree below this mode. This also
+    keeps interpolation of arbitrary real sequences real.
+    """
+    phase = xp.exp(((-1j if adjoint else 1j) * xp.pi) * xp.fft.fftfreq(ftm.shape[-2]))
+    phase = xp.where(xp.arange(ftm.shape[-2]) == ftm.shape[-2] // 2, 0, phase)
+    return xp.fft.ifft(xp.fft.fft(ftm, axis=-2) * phase[:, None], axis=-2)
+
+
+def folded_cc_quadrature(
+    ftm: np.ndarray,
+    L: int,
+    spin: int = 0,
+    m_start: int = 0,
+    xp: ModuleType = np,
+) -> np.ndarray:
+    r"""
+    Apply :math:`Q_e + A^* Q_o A` on the original ``L+1`` CC rings.
+
+    Here A extends with spin parity, shifts by half a ring, and restricts to
+    the L midpoint rings. Dense theta weights are split from the ``2L+1``
+    point rule, but longitude normalisation uses the actual ``2L`` samples.
+    No dense spatial map or dense latitudinal projection is constructed.
+    """
+    from s2fft.utils import quadrature
+
+    weights = quadrature.quad_weights_cc_theta_only(2 * L, xp=xp) * (xp.pi / L)
+    midpoints = half_grid_shift_cc(periodic_extension_cc(ftm, spin, m_start, xp), xp=xp)
+    weighted = midpoints[..., :L, :] * weights[1::2, None]
+    padded = xp.concatenate((weighted, xp.zeros_like(weighted)), axis=-2)
+    folded = periodic_extension_cc_adjoint(
+        half_grid_shift_cc(padded, adjoint=True, xp=xp), spin, m_start, xp
+    )
+    return ftm * weights[::2, None] + folded
 
 
 def periodic_extension(

@@ -61,8 +61,10 @@ def _bandlimit_from_n_theta(n_theta, rule):
     match rule:
         case "mw" | "gl":
             return n_theta
-        case "f2" | "cc":
+        case "f2":
             return n_theta // 2 + 1
+        case "cc":
+            return n_theta - 1
         case "mwss":
             return n_theta - 1
         case "dh":
@@ -75,8 +77,10 @@ def _min_n_points_exact(rule, polynomial_degree):
     match rule:
         case "gl":
             return polynomial_degree // 2 + 1
-        case "f2" | "cc":
+        case "f2":
             return polynomial_degree
+        case "cc":
+            return polynomial_degree + 1 - (polynomial_degree % 2)
         case "dh" | "mw":
             return polynomial_degree + 1
         case "mwss":
@@ -180,3 +184,16 @@ def test_quadrature_weights(sampling, L_or_nside, quadrature_module):
         assert np.isclose(
             (weights * samples.nphi_equiang(L, sampling)).sum(), 4 * np.pi
         )
+
+
+@pytest.mark.parametrize("L", [1, 5, 6, 72])
+@pytest.mark.parametrize("module", [quadrature, quadrature_jax])
+def test_cc_dense_weight_split(L, module):
+    weights = module.quad_weights_cc_theta_only(2 * L)
+    assert weights.shape == (2 * L + 1,)
+    assert weights[::2].shape == (L + 1,)
+    assert weights[1::2].shape == (L,)
+    np.testing.assert_allclose(weights.sum(), 2, atol=1e-14)
+    np.testing.assert_allclose(
+        (weights * (np.pi / L)).sum() * (2 * L), 4 * np.pi, atol=1e-14
+    )

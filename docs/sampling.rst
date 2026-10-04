@@ -60,7 +60,7 @@ We denote by :math:`L` the band-limit of the signals we are considering.
       - No
     * - :ref:`clenshaw-curtis-cc`
       - ``"cc"``
-      - :math:`(2L - 1) \times 2L`
+      - :math:`(L+1) \times 2L`
       - Yes
       - No
       - Yes
@@ -243,14 +243,22 @@ Sample positions are defined by
 
 .. math::
 
-  \theta_t  &= \frac{\pi t}{2L-2},  &\quad t\in\lbrace 0,1,...,2L-2   \rbrace, \\
+  \theta_t  &= \frac{\pi t}{L},  &\quad t\in\lbrace 0,1,...,L   \rbrace, \\
   \varphi_p &= \frac{2\pi p}{2L},    &\quad p\in\lbrace 0,1,...,2L-1\rbrace.
 
 Note that here we follow the original definition of the Clenshaw-Curtis quadrature rule
 and include samples at both poles.
 An analogous scheme which excludes the pole is available as :ref:`F2 <fejer-rule-2-f2>`.
 Due to the redundancy in samples at the poles,
-the total number of distinct sites on the sphere used by this sampling scheme is :math:`(2L-3)(2L)+2 = 4L^2 -6L + 2`.
+the total number of distinct sites on the sphere used by this sampling scheme is :math:`(L-1)(2L)+2`.
+
+The stored map has shape :math:`(L+1)\times 2L` and supports degrees
+:math:`0,\ldots,L-1`. For example, :math:`L=72` uses a :math:`73\times144` map.
+Forward analysis uses the doubled-Fourier-sphere / folded-resampling construction
+of `Reinecke, Belkner and Carron (2023), Appendix A <https://doi.org/10.1051/0004-6361/202346717>`_.
+This applies dense Clenshaw-Curtis quadrature through meridional resampling while
+keeping the Wigner-:math:`d` projection on the original :math:`L+1` rings.
+Inverse synthesis evaluates the harmonics directly on these rings.
 
 For further information see `Hotte and Ujiie (2018) <https://doi.org/10.1002%2Fqj.3282>`_.
 

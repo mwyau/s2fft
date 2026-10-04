@@ -233,3 +233,107 @@ def test_sampling_exceptions(flm_generator):
 
     with pytest.raises(ValueError):
         spherical.forward(None, 0, 0, None, method="incorrect")
+
+
+@pytest.mark.parametrize("L", [6, 7])
+@pytest.mark.parametrize(
+    "spin_reality",
+    [(0, False), (0, True), (-1, False), (1, False), (-2, False), (2, False)],
+)
+@pytest.mark.parametrize("method", method_to_test)
+@pytest.mark.parametrize("spmd", multiple_gpus)
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+@pytest.mark.parametrize("use_generate_precomputes", [False, True])
+def test_cc_low_ring_roundtrip(
+    flm_generator, L, spin_reality, method, spmd, use_generate_precomputes
+):
+    if spmd and method != "jax":
+        pytest.skip("SPMD is a JAX option.")
+    if spmd:
+        # The existing SPMD harmonic partition requires L to divide evenly.
+        L += (-L) % jax.local_device_count()
+    spin, reality = spin_reality
+    flm = flm_generator(L=L, spin=spin, reality=reality)
+    coeffs = torch.from_numpy(flm) if method == "torch" else flm
+    inverse_precomps = (
+        generate_precomputes(L, spin, "cc") if use_generate_precomputes else None
+    )
+    forward_precomps = (
+        generate_precomputes(L, spin, "cc", forward=True)
+        if use_generate_precomputes
+        else None
+    )
+    f = spherical.inverse(
+        coeffs,
+        L,
+        spin,
+        sampling="cc",
+        reality=reality,
+        method=method,
+        spmd=spmd,
+        precomps=inverse_precomps,
+    )
+    assert f.shape == (L + 1, 2 * L)
+    recovered = spherical.forward(
+        f,
+        L,
+        spin,
+        sampling="cc",
+        reality=reality,
+        method=method,
+        spmd=spmd,
+        precomps=forward_precomps,
+    )
+    if method == "torch":
+        recovered = recovered.resolve_conj().numpy()
+    np.testing.assert_allclose(recovered, flm, atol=2e-13, rtol=2e-13)
+
+
+@pytest.mark.parametrize("L", [8, 72])
+@pytest.mark.parametrize("spin", [0, -1, 1, -2, 2])
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_cc_high_degree_modes(L, spin):
+    flm = np.zeros(samples.flm_shape(L), dtype=np.complex128)
+    for m in [0, 1, L - 2, L - 1, -1, 2 - L, 1 - L]:
+        flm[-1, L - 1 + m] = 0.3 + 0.7j
+    f = spherical.inverse(flm, L, spin, sampling="cc", method="numpy")
+    recovered = spherical.forward(f, L, spin, sampling="cc", method="numpy")
+    np.testing.assert_allclose(recovered, flm, atol=2e-13, rtol=2e-13)
+
+
+@pytest.mark.parametrize("spin", [0, -2, 2])
+@pytest.mark.parametrize("method", ["numpy", "jax"])
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_cc_realistic_roundtrip(flm_generator, spin, method):
+    L = 72
+    reality = spin == 0
+    flm = flm_generator(L=L, spin=spin, reality=reality)
+    # Use the same synthesis input for both analysis implementations.
+    f = spherical.inverse(flm, L, spin, sampling="cc", reality=reality, method="numpy")
+    assert f.shape == (73, 144)
+    recovered = spherical.forward(
+        f, L, spin, sampling="cc", reality=reality, method=method
+    )
+    np.testing.assert_allclose(recovered, flm, atol=3e-12, rtol=3e-12)
+
+
+@pytest.mark.parametrize("method", method_to_test)
+@pytest.mark.parametrize("reality", reality_to_test)
+@pytest.mark.parametrize("precompute", [False, True])
+def test_cc_monopole(method, reality, precompute):
+    from s2fft.base_transforms import spherical as base
+    from s2fft.precompute_transforms import spherical as precomputed
+
+    module = precomputed if precompute else spherical
+    flm = np.array([[0.7 if reality else 0.7 + 0.2j]], dtype=np.complex128)
+    coeffs = torch.from_numpy(flm) if method == "torch" else flm
+    f = module.inverse(coeffs, 1, sampling="cc", reality=reality, method=method)
+    assert f.shape == (2, 2)
+    recovered = module.forward(f, 1, sampling="cc", reality=reality, method=method)
+    if method == "torch":
+        f = f.resolve_conj().numpy()
+        recovered = recovered.resolve_conj().numpy()
+    np.testing.assert_allclose(
+        f, base.inverse(flm, 1, sampling="cc", reality=reality), atol=1e-15
+    )
+    np.testing.assert_allclose(recovered, flm, atol=1e-15)
