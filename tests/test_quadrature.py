@@ -48,3 +48,32 @@ def test_quadrature_exceptions():
 
     with pytest.raises(ValueError):
         quadrature.quad_weights(L, sampling="foo")
+
+
+@pytest.mark.parametrize("module", [quadrature, quadrature_jax, quadrature_torch])
+@pytest.mark.parametrize("nphi", [12, 15])
+def test_gl_physical_quadrature(module, nphi):
+    L = 6
+    q = np.asarray(module.quad_weights(L, "gl", nphi=nphi))
+    np.testing.assert_allclose(nphi * q.sum(), 4 * np.pi, rtol=1e-14)
+    np.testing.assert_array_equal(q, module.quad_weights_gl(L, nphi))
+    default = module.quad_weights_gl(L)
+    np.testing.assert_array_equal(default, module.quad_weights_gl(L, None))
+    np.testing.assert_array_equal(default, module.quad_weights_gl(L, 2 * L - 1))
+    np.testing.assert_array_equal(default, module.quad_weights(L, "gl"))
+    np.testing.assert_array_equal(default, module.quad_weights(L, "gl", nphi=None))
+    np.testing.assert_array_equal(default, module.quad_weights(L, "gl", nphi=2 * L - 1))
+    np.testing.assert_array_equal(default, module.quad_weights_transform(L, "gl"))
+    np.testing.assert_allclose(q * nphi, np.asarray(default) * (2 * L - 1), rtol=1e-14)
+
+
+@pytest.mark.parametrize("module", [quadrature, quadrature_jax, quadrature_torch])
+def test_gl_quadrature_invalid_longitude_counts(module):
+    for nphi in [10, 0, -1, 12.5, True]:
+        for weights in [module.quad_weights_gl, module.quad_weights]:
+            kwargs = {"sampling": "gl"} if weights == module.quad_weights else {}
+            with pytest.raises(ValueError, match="nphi"):
+                weights(6, nphi=nphi, **kwargs)
+    for sampling in ["mw", "mwss", "dh", "healpix"]:
+        with pytest.raises(ValueError, match="only supported for GL"):
+            module.quad_weights(6, sampling, nphi=12)

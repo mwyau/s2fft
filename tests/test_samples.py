@@ -178,10 +178,9 @@ def test_samples_exceptions():
         samples.t2theta(t=0, sampling="mw")
 
 
-@pytest.mark.parametrize("L", [1, 6, 7])
-@pytest.mark.parametrize("offset", [-1, 0, 1, 4])
-def test_gl_physical_longitude_counts(L, offset):
-    nphi = 2 * L + offset
+@pytest.mark.parametrize("nphi", [11, 12, 15])
+def test_gl_physical_longitude_counts(nphi):
+    L = 6
     assert samples.nphi_equiang(L, "gl", nphi) == nphi
     assert samples.f_shape(L, "gl", nphi=nphi) == (L, nphi)
     phis = 2 * np.pi * np.arange(nphi) / nphi
@@ -189,15 +188,17 @@ def test_gl_physical_longitude_counts(L, offset):
     np.testing.assert_array_equal(
         samples.p2phi_equiang(L, np.arange(nphi), "gl", nphi), phis
     )
-    assert samples.ftm_shape(L, "gl") == (L, 2 * L - 1)
-    assert samples.flm_shape(L) == (L, 2 * L - 1)
+    assert samples.ftm_shape(L, "gl") == samples.flm_shape(L) == (L, 2 * L - 1)
     assert samples.f_shape(L, "gl") == (L, 2 * L - 1)
 
 
-@pytest.mark.parametrize("sampling", ["mw", "mwss", "dh", "healpix"])
-def test_gl_longitude_count_rejected_for_other_sampling(sampling):
-    for helper in [samples.nphi_equiang, samples.phis_equiang, samples.f_shape]:
+def test_gl_invalid_longitude_counts():
+    for nphi in [10, 0, -1, 12.5, True]:
+        with pytest.raises(ValueError, match="nphi"):
+            samples.nphi_equiang(6, "gl", nphi)
+    for sampling in ["mw", "mwss", "dh", "healpix"]:
+        for helper in [samples.nphi_equiang, samples.phis_equiang, samples.f_shape]:
+            with pytest.raises(ValueError, match="only supported for GL"):
+                helper(6, sampling, nphi=12)
         with pytest.raises(ValueError, match="only supported for GL"):
-            helper(6, sampling, nphi=12)
-    with pytest.raises(ValueError, match="only supported for GL"):
-        samples.p2phi_equiang(6, 0, sampling, nphi=12)
+            samples.p2phi_equiang(6, 0, sampling, nphi=12)

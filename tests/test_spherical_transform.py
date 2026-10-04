@@ -1,10 +1,13 @@
 from collections.abc import Callable
+from functools import partial
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 import torch
 
+from s2fft.precompute_transforms import spherical as precompute
 from s2fft.recursions.price_mcewen import generate_precomputes
 from s2fft.sampling import s2_samples as samples
 from s2fft.transforms import spherical
@@ -233,3 +236,118 @@ def test_sampling_exceptions(flm_generator):
 
     with pytest.raises(ValueError):
         spherical.forward(None, 0, 0, None, method="incorrect")
+
+
+@pytest.mark.parametrize("module", [spherical, precompute])
+@pytest.mark.parametrize("method", method_to_test)
+@pytest.mark.parametrize("reality", [False, True])
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_gl_custom_width_roundtrip(flm_generator, module, method, reality):
+    L = 6
+    flm = flm_generator(L=L, reality=reality)
+    coefficients = torch.from_numpy(flm) if method == "torch" else flm
+    if method == "torch" and module == spherical and not reality:
+        coefficients.requires_grad_()
+    kwargs = dict(L=L, sampling="gl", method=method, reality=reality)
+    native = module.inverse(coefficients, **kwargs)
+    explicit = module.inverse(coefficients, nphi=2 * L - 1, **kwargs)
+    f = module.inverse(coefficients, nphi=2 * L, **kwargs)
+    recovered = module.forward(f, **kwargs)
+    if method == "torch":
+        if coefficients.requires_grad:
+            torch.sum(torch.abs(recovered) ** 2).backward()
+            np.testing.assert_allclose(
+                coefficients.grad.resolve_conj().numpy(),
+                2 * flm,
+                rtol=1e-12,
+                atol=1e-12,
+            )
+        native, explicit, f, recovered = (
+            x.detach().resolve_conj().numpy() for x in [native, explicit, f, recovered]
+        )
+    np.testing.assert_array_equal(native, explicit)
+    assert f.shape == (L, 2 * L)
+    assert recovered.shape == (L, 2 * L - 1)
+    np.testing.assert_allclose(recovered, flm, rtol=1e-12, atol=1e-12)
+
+
+@pytest.mark.parametrize("reality", [False, True])
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_gl_nyquist_and_extra_modes(flm_generator, reality):
+    L, nphi = 5, 14
+    kwargs = dict(L=L, sampling="gl", method="numpy", reality=reality)
+    flm = flm_generator(L=L, reality=reality)
+    f = spherical.inverse(flm, nphi=nphi, **kwargs)
+    np.testing.assert_allclose(
+        np.fft.fft(f, axis=-1)[:, L : nphi - L + 1], 0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        spherical.forward(f, **kwargs), flm, rtol=1e-12, atol=1e-12
+    )
+    phis = samples.phis_equiang(L, "gl", nphi)
+    for order in [L, nphi // 2]:
+        extra_mode = np.tile(np.exp(1j * order * phis), (L, 1))
+        np.testing.assert_allclose(
+            spherical.forward(extra_mode.real if reality else extra_mode, **kwargs),
+            0,
+            atol=1e-13,
+        )
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_gl_custom_width_jax_transformability(flm_generator):
+    L = 5
+    flm = jnp.asarray(flm_generator(L=L))
+    kwargs = dict(L=L, sampling="gl", method="jax")
+    inv = jax.jit(partial(spherical.inverse, nphi=2 * L, **kwargs))
+    fwd = jax.jit(partial(spherical.forward, **kwargs))
+    f, df = jax.jvp(inv, (flm,), (0.3 * flm,))
+    recovered, dflm = jax.jvp(fwd, (f,), (df,))
+    np.testing.assert_allclose(recovered, flm, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(dflm, 0.3 * flm, rtol=1e-12, atol=1e-12)
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_gl_custom_width_iterative_refinement(flm_generator):
+    L = 6
+    flm = flm_generator(L=L)
+    kwargs = dict(L=L, sampling="gl", method="jax")
+    f = spherical.inverse(flm, nphi=15, **kwargs)
+    np.testing.assert_allclose(
+        spherical.forward(f, iter=1, **kwargs), flm, rtol=1e-12, atol=1e-12
+    )
+
+
+def test_gl_ssht_custom_count_rejected():
+    with pytest.raises(ValueError, match="jax_ssht"):
+        spherical.inverse(
+            np.zeros((6, 11)), 6, sampling="gl", method="jax_ssht", nphi=12
+        )
+    with pytest.raises(ValueError, match="jax_ssht"):
+        spherical.forward(np.zeros((6, 12)), 6, sampling="gl", method="jax_ssht")
+
+
+@pytest.fixture
+def cached_ducc_gl_test_case(cached_test_case_wrapper, flm_generator):
+    def generate_data(L, nphi):
+        ducc = pytest.importorskip("ducc0")
+        flm = flm_generator(L=L, reality=True)
+        alm = samples.flm_2d_to_hp(flm, L)[None, :]
+        f = ducc.sht.experimental.synthesis_2d(
+            alm=alm, spin=0, lmax=L - 1, geometry="GL", ntheta=L, nphi=nphi
+        )[0]
+        return {"flm": flm, "f": f}
+
+    return cached_test_case_wrapper(generate_data, "npz")
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_gl_custom_width_ducc(cached_ducc_gl_test_case):
+    L = 6
+    data = cached_ducc_gl_test_case(L, 2 * L)
+    kwargs = dict(L=L, sampling="gl", method="numpy", reality=True)
+    f = spherical.inverse(data["flm"], nphi=2 * L, **kwargs)
+    np.testing.assert_allclose(f, data["f"], rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(
+        spherical.forward(data["f"], **kwargs), data["flm"], rtol=1e-12, atol=1e-12
+    )

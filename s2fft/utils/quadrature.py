@@ -51,7 +51,11 @@ def quad_weights_transform(
 
 
 def quad_weights(
-    L: int = None, sampling: str = "mw", spin: int = 0, nside: int = None
+    L: int = None,
+    sampling: str = "mw",
+    spin: int = 0,
+    nside: int = None,
+    nphi: int | None = None,
 ) -> np.ndarray:
     r"""
     Compute quadrature weights for :math:`\theta` and :math:`\phi`
@@ -69,6 +73,9 @@ def quad_weights(
         nside (int, optional): HEALPix Nside resolution parameter.  Only required
             if sampling="healpix".  Defaults to None.
 
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+
     Raises:
         ValueError: Invalid sampling scheme.
 
@@ -77,6 +84,9 @@ def quad_weights(
         (weights are identical as :math:`\phi` varies for given :math:`\theta`).
 
     """
+    if nphi is not None:
+        samples.nphi_equiang(L, sampling, nphi)
+
     if sampling.lower() == "mw":
         return quad_weights_mw(L, spin)
 
@@ -87,7 +97,7 @@ def quad_weights(
         return quad_weights_dh(L)
 
     elif sampling.lower() == "gl":
-        return quad_weights_gl(L)
+        return quad_weights_gl(L, nphi)
 
     elif sampling.lower() == "healpix":
         return quad_weights_hp(nside)
@@ -122,18 +132,23 @@ def quad_weights_hp(nside: int) -> np.ndarray:
     return hp_weights
 
 
-def quad_weights_gl(L: int) -> np.ndarray:
+def quad_weights_gl(L: int, nphi: int | None = None) -> np.ndarray:
     r"""
     Compute GL quadrature weights for :math:`\theta` and :math:`\phi` integration.
 
     Args:
         L (int): Harmonic band-limit.
 
+        nphi (int, optional): Physical longitude count, at least :math:`2L-1`.
+            Defaults to :math:`2L-1`. Weights include the longitude factor
+            :math:`2\pi/\texttt{nphi}`.
+
     Returns:
         np.ndarray: Weights computed for each :math:`\theta` (weights are identical
         as :math:`\phi` varies for given :math:`\theta`).
 
     """
+    nphi = samples.nphi_equiang(L, "gl", nphi)
     x1, x2 = -1.0, 1.0
     ntheta = samples.ntheta(L, "gl")
     weights = np.zeros(ntheta, dtype=np.float64)
@@ -158,7 +173,7 @@ def quad_weights_gl(L: int) -> np.ndarray:
     weights[i - 1] = 2.0 * x1 / ((1.0 - z**2) * pp * pp)
     weights[L + 1 - i - 1] = weights[i - 1]
 
-    return weights * 2 * np.pi / (2 * L - 1)
+    return weights * 2 * np.pi / nphi
 
 
 def quad_weights_dh(L: int) -> np.ndarray:

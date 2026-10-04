@@ -73,22 +73,10 @@ McEwen & Wiaux sampling theorem reduces the Nyquist rate on the sphere
 by a factor of two compared to the Driscoll & Healy approach, halving
 the number of spherical samples required.
 
-Gauss–Legendre spherical transforms default to an `L × (2L - 1)` grid.
-To synthesize an `L × 2L` grid, use
-`s2fft.inverse(flm, L, sampling="gl", nphi=2 * L)`; any integer
-`nphi >= 2L - 1` is supported. The on-the-fly and precomputed transforms support
-these grids in NumPy, JAX, and Torch, as do the NumPy base transforms.
-Forward transforms infer the
-longitude count from `f.shape[-1]`. Use the same `nphi` with
-`sampling.s2_samples.f_shape`, `nphi_equiang`, `phis_equiang`, or `p2phi_equiang`
-to describe the physical grid. Coefficients retain shape `(L, 2L - 1)` and all
-orders `|m| <= L - 1`; the internal `ftm` width remains `2L - 1`.
-Analysis discards longitude modes outside that bandwidth, including the Nyquist
-bin for even longitude counts; synthesis sets those bins to zero. Existing
-latitude precomputes and kernels can be reused for every supported longitude
-count, and their quadrature normalization remains tied to the internal width.
-`nphi` is static when compiling JAX synthesis. Custom longitude counts are
-specific to GL spherical transforms; the `jax_ssht` backend uses the default grid.
+Gauss–Legendre spherical transforms support configurable longitude counts:
+`s2fft.inverse(flm, L, sampling="gl", nphi=2 * L)` synthesizes an `L × 2L`
+grid. See the [sampling documentation](https://astro-informatics.github.io/s2fft/sampling.html#gauss-legendre-gl)
+for grid conventions and supported counts.
 
 The popular [HEALPix](https://healpix.jpl.nasa.gov) sampling scheme
 ([Gorski et al. 2005](https://arxiv.org/abs/astro-ph/0409513)) is also

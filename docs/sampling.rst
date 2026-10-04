@@ -48,7 +48,7 @@ We denote by $L$ the band-limit of the signals we are considering.
       - Yes
     * - :ref:`gauss-legendre-gl`
       - ``"gl"``
-      - :math:`L\times (2L-1)`
+      - :math:`L\times n_\phi` (default :math:`n_\phi=2L-1`)
       - No
       - No
       - Yes
@@ -184,14 +184,44 @@ Further information; `Driscoll & Healy (1995) <https://www.sciencedirect.com/sci
 Gauss-Legendre (GL)
 -------------------
 
-The GL sampling theorem also requires an array of :math:`L\times (2L-1) \sim 2L^2` elements to represent the signal.
-Like :ref:`DH <driscoll-healy-dh>`, there is no redundancy in samples at the poles, so the same number of independent degrees of freedom are needed.
+GL uses an array of :math:`L\times n_\phi` elements, with default
+:math:`n_\phi=2L-1` and support for any integer :math:`n_\phi\geq 2L-1`.
+At the default resolution this is :math:`\sim 2L^2` samples.
+Like :ref:`DH <driscoll-healy-dh>`, there are no sample points at the poles.
 
-The :math:`\theta_t` are determined by the roots of the Legendre polynomials of order $L$, whilst the :math:`\varphi_p` are defined by
+The :math:`\theta_t` are determined by the roots of the Legendre polynomials of
+order $L$, whilst the longitudes are defined by
 
 .. math::
 
-  \varphi_p = \frac{2\pi p}{2L-1},  \quad p\in\lbrace 0, 1, ...,2L-2\rbrace.
+  \varphi_p = \frac{2\pi p}{n_\phi}, \quad p\in\lbrace 0, 1, ..., n_\phi-1\rbrace.
+
+The harmonic bandwidth remains :math:`|m|\leq L-1`, with harmonic coefficient
+shape :math:`(L,2L-1)` regardless of the physical longitude count.
+Analysis ignores extra longitude modes outside this bandwidth, and synthesis
+sets them to zero. For even widths, the Nyquist bin is outside the represented
+harmonic bandwidth.
+
+Pass ``nphi`` to spherical synthesis and the longitude sampling helpers to
+select the physical grid; analysis infers it from ``f.shape[-1]``. For example:
+
+.. code-block:: python
+
+  nphi = 2 * L
+  gl_phis = phis_equiang(L, sampling="gl", nphi=nphi)
+  gl_signal_samples = inverse(flm_gl, L, sampling="gl", nphi=nphi)
+  flm_gl = forward(gl_signal_samples, L, sampling="gl")
+
+NumPy, JAX, and Torch spherical transforms support these grids, including
+precomputed transforms; latitude precomputes and kernels can be reused across
+longitude counts. ``nphi`` is static when compiling JAX synthesis. The
+``jax_ssht`` backend uses the default GL grid.
+
+For physical integration, pass the same ``nphi`` to
+:func:`~s2fft.utils.quadrature.quad_weights` or
+:func:`~s2fft.utils.quadrature.quad_weights_gl` (also available in JAX and Torch).
+These weights include the longitude factor :math:`2\pi/n_\phi`.
+Transform quadrature and precomputed kernels retain their existing normalization.
 
 Further information; `Gauss-Legendre (1986) <https://link.springer.com/article/10.1007/BF02519350>`_.
 

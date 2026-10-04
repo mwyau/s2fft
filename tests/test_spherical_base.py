@@ -173,3 +173,24 @@ def test_L_lower_exception(flm_generator, L: int):
 
     with pytest.raises(AssertionError):
         spherical.inverse(flm, L, spin, sampling, L_lower=L)
+
+
+@pytest.mark.parametrize("method", method_to_test)
+def test_gl_custom_width_longitude_polynomial(flm_generator, method):
+    L, nphi, spin = 6, 15, 1
+    flm = flm_generator(L=L, spin=spin)
+    kwargs = dict(L=L, spin=spin, sampling="gl", method=method)
+    native = spherical._inverse(flm, **kwargs)
+    orders = np.arange(-L + 1, L)
+    native_phis = samples.phis_equiang(L, "gl")
+    modes = native @ np.exp(-1j * native_phis[:, None] * orders) / (2 * L - 1)
+    phis = samples.phis_equiang(L, "gl", nphi)
+    expected = modes @ np.exp(1j * orders[:, None] * phis)
+    f = spherical._inverse(flm, nphi=nphi, **kwargs)
+    np.testing.assert_array_equal(
+        native, spherical._inverse(flm, nphi=2 * L - 1, **kwargs)
+    )
+    np.testing.assert_allclose(f, expected, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(
+        spherical._forward(f, **kwargs), flm, rtol=1e-12, atol=1e-12
+    )

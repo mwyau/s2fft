@@ -53,8 +53,13 @@ def quad_weights_transform(
         raise ValueError(f"Sampling scheme sampling={sampling} not supported")
 
 
-@_partial(_jit, static_argnums=(0, 1, 2))
-def quad_weights(L: int = None, sampling: str = "mw", nside: int = None) -> jnp.ndarray:
+@_partial(_jit, static_argnums=(0, 1, 2, 3))
+def quad_weights(
+    L: int = None,
+    sampling: str = "mw",
+    nside: int = None,
+    nphi: int | None = None,
+) -> jnp.ndarray:
     r"""
     Compute quadrature weights for :math:`\theta` and :math:`\phi`
     integration for various sampling schemes. JAX implementation of
@@ -67,10 +72,12 @@ def quad_weights(L: int = None, sampling: str = "mw", nside: int = None) -> jnp.
         sampling (str, optional): Sampling scheme.  Supported sampling schemes include
             {"mw", "mwss", "dh", "gl", "healpix"}.  Defaults to "mw".
 
-        spin (int, optional): Harmonic spin. Defaults to 0.
-
         nside (int, optional): HEALPix Nside resolution parameter.  Only required
             if sampling="healpix".  Defaults to None.
+
+        nphi (int, optional): Physical longitude count for GL sampling only.
+            Must be at least :math:`2L-1`. Defaults to :math:`2L-1` for GL.
+            Static when compiling with JAX.
 
     Raises:
         ValueError: Invalid sampling scheme.
@@ -80,6 +87,9 @@ def quad_weights(L: int = None, sampling: str = "mw", nside: int = None) -> jnp.
         (weights are identical as :math:`\phi` varies for given :math:`\theta`).
 
     """
+    if nphi is not None:
+        samples.nphi_equiang(L, sampling, nphi)
+
     if sampling.lower() == "mw":
         return quad_weights_mw(L)
 
@@ -90,7 +100,7 @@ def quad_weights(L: int = None, sampling: str = "mw", nside: int = None) -> jnp.
         return quad_weights_dh(L)
 
     elif sampling.lower() == "gl":
-        return quad_weights_gl(L)
+        return quad_weights_gl(L, nphi)
 
     elif sampling.lower() == "healpix":
         return quad_weights_hp(nside)
@@ -123,19 +133,24 @@ def quad_weights_hp(nside: int) -> jnp.ndarray:
     return jnp.ones(rings, dtype=jnp.float64) * 4 * jnp.pi / npix
 
 
-@_partial(_jit, static_argnums=(0))
-def quad_weights_gl(L: int) -> jnp.ndarray:
+@_partial(_jit, static_argnums=(0, 1))
+def quad_weights_gl(L: int, nphi: int | None = None) -> jnp.ndarray:
     r"""
     Compute GL quadrature weights for :math:`\theta` and :math:`\phi` integration.
 
     Args:
         L (int): Harmonic band-limit.
 
+        nphi (int, optional): Physical longitude count, at least :math:`2L-1`.
+            Defaults to :math:`2L-1`. Weights include the longitude factor
+            :math:`2\pi/\texttt{nphi}`. Static when compiling with JAX.
+
     Returns:
         jnp.ndarray: Weights computed for each :math:`\theta` (weights are identical
         as :math:`\phi` varies for given :math:`\theta`).
 
     """
+    nphi = samples.nphi_equiang(L, "gl", nphi)
     x1, x2 = -1.0, 1.0
     ntheta = samples.ntheta(L, "gl")
     weights = jnp.zeros(ntheta, dtype=jnp.float64)
@@ -174,7 +189,7 @@ def quad_weights_gl(L: int) -> jnp.ndarray:
     weights = weights.at[i - 1].set(2.0 * x1 / ((1.0 - z**2) * pp * pp))
     weights = weights.at[L + 1 - i - 1].set(weights[i - 1])
 
-    return weights * 2 * jnp.pi / (2 * L - 1)
+    return weights * 2 * jnp.pi / nphi
 
 
 @_partial(_jit, static_argnums=(0))
